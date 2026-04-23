@@ -302,64 +302,67 @@ export const tools: ToolDefinition[] = [
     async run(_scope, input) {
       const minHours = Number(input.min_hours_waiting ?? 0);
       const supabase = getSupabase();
-      const cfg = loadConfig();
 
-      // Pull recent open WhatsApp conversations
-      const { data: convs, error } = await supabase
-        .from("conversations")
-        .select(`
-          id, last_message_at,
-          person:persons!conversations_person_id_fkey(first_name, last_name, whatsapp_number),
-          case_id
-        `)
-        .eq("org_id", cfg.supabase.orgId)
-        .eq("channel_type", "whatsapp")
-        .eq("status", "open")
-        .order("last_message_at", { ascending: false })
-        .limit(100);
-
-      if (error || !convs) return { ok: false, error: error?.message ?? "no data" };
-
-      // For each, find the latest message and its direction
-      const convIds = convs.map((c: any) => c.id);
-      if (convIds.length === 0) return { ok: true, data: [] };
-
-      const { data: msgs } = await supabase
+      // Pull recent whatsapp_messages directly (more reliable than going via
+      // conversations — many conversation rows are empty stubs with
+      // last_message_at NULL that pollute the sort).
+      const { data: recent, error } = await supabase
         .from("whatsapp_messages")
-        .select("conversation_id, direction, created_at, message_body, body_text")
-        .in("conversation_id", convIds)
-        .order("created_at", { ascending: false });
+        .select("conversation_id, direction, created_at, message_body, body_text, from_number, person_id")
+        .order("created_at", { ascending: false })
+        .limit(500);
 
+      if (error || !recent) return { ok: false, error: error?.message ?? "no data" };
+
+      // Keep only the latest message per conversation
       const latestByConv = new Map<string, any>();
-      for (const m of msgs ?? []) {
-        if (!latestByConv.has((m as any).conversation_id)) {
-          latestByConv.set((m as any).conversation_id, m);
-        }
+      for (const m of recent) {
+        const convId = (m as any).conversation_id;
+        if (!convId) continue;
+        if (!latestByConv.has(convId)) latestByConv.set(convId, m);
       }
 
+      // Filter to conversations where the latest message is inbound (= waiting)
       const now = Date.now();
-      const waiting = convs
-        .map((c: any) => {
-          const latest = latestByConv.get(c.id);
-          if (!latest || latest.direction !== "inbound") return null;
-          const hours = (now - new Date(latest.created_at).getTime()) / 3600000;
-          if (hours < minHours) return null;
-          const name = c.person
-            ? `${c.person.first_name ?? ""} ${c.person.last_name ?? ""}`.trim()
-            : "Unknown";
-          return {
-            person: name,
-            phone: c.person?.whatsapp_number ?? null,
-            last_inbound_at: latest.created_at,
-            last_inbound_preview: (latest.message_body ?? latest.body_text ?? "").slice(0, 80),
-            hours_waiting: Math.round(hours * 10) / 10,
-            conversation_id: c.id,
-            case_id: c.case_id,
-          };
+      const waitingRaw = Array.from(latestByConv.values())
+        .filter((m: any) => m.direction === "inbound")
+        .map((m: any) => {
+          const hours = (now - new Date(m.created_at).getTime()) / 3600000;
+          return { ...m, hours_waiting: Math.round(hours * 10) / 10 };
         })
-        .filter((x) => x !== null)
+        .filter((m: any) => m.hours_waiting >= minHours)
         .sort((a: any, b: any) => b.hours_waiting - a.hours_waiting)
         .slice(0, 20);
+
+      if (waitingRaw.length === 0) return { ok: true, data: [] };
+
+      // Enrich with person info where available
+      const personIds = [
+        ...new Set(waitingRaw.map((m: any) => m.person_id).filter(Boolean)),
+      ];
+      const personsById = new Map<string, any>();
+      if (personIds.length > 0) {
+        const { data: persons } = await supabase
+          .from("persons")
+          .select("id, first_name, last_name, whatsapp_number")
+          .in("id", personIds);
+        for (const p of persons ?? []) personsById.set((p as any).id, p);
+      }
+
+      const waiting = waitingRaw.map((m: any) => {
+        const person = personsById.get(m.person_id);
+        const name = person
+          ? `${person.first_name ?? ""} ${person.last_name ?? ""}`.trim()
+          : m.from_number ?? "Unknown";
+        return {
+          person: name,
+          phone: person?.whatsapp_number ?? m.from_number ?? null,
+          last_inbound_at: m.created_at,
+          last_inbound_preview: (m.message_body ?? m.body_text ?? "").slice(0, 80),
+          hours_waiting: m.hours_waiting,
+          conversation_id: m.conversation_id,
+        };
+      });
 
       return { ok: true, data: waiting };
     },

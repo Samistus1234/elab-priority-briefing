@@ -285,6 +285,86 @@ export const tools: ToolDefinition[] = [
     },
   },
   {
+    name: "whatsapp_inbox_waiting",
+    description:
+      "List open WhatsApp conversations where the CLIENT has sent the most recent message (i.e. we haven't replied yet). Returns up to 20 conversations sorted by oldest-waiting first. Use for questions like 'who's waiting in the inbox', 'any clients unreplied', 'WhatsApp queue'.",
+    input_schema: {
+      type: "object",
+      properties: {
+        min_hours_waiting: {
+          type: "number",
+          description:
+            "Optional — only include conversations waiting at least this many hours. Default 0 (all).",
+        },
+      },
+      required: [],
+    },
+    async run(_scope, input) {
+      const minHours = Number(input.min_hours_waiting ?? 0);
+      const supabase = getSupabase();
+      const cfg = loadConfig();
+
+      // Pull recent open WhatsApp conversations
+      const { data: convs, error } = await supabase
+        .from("conversations")
+        .select(`
+          id, last_message_at,
+          person:persons!conversations_person_id_fkey(first_name, last_name, whatsapp_number),
+          case_id
+        `)
+        .eq("org_id", cfg.supabase.orgId)
+        .eq("channel_type", "whatsapp")
+        .eq("status", "open")
+        .order("last_message_at", { ascending: false })
+        .limit(100);
+
+      if (error || !convs) return { ok: false, error: error?.message ?? "no data" };
+
+      // For each, find the latest message and its direction
+      const convIds = convs.map((c: any) => c.id);
+      if (convIds.length === 0) return { ok: true, data: [] };
+
+      const { data: msgs } = await supabase
+        .from("whatsapp_messages")
+        .select("conversation_id, direction, created_at, message_body, body_text")
+        .in("conversation_id", convIds)
+        .order("created_at", { ascending: false });
+
+      const latestByConv = new Map<string, any>();
+      for (const m of msgs ?? []) {
+        if (!latestByConv.has((m as any).conversation_id)) {
+          latestByConv.set((m as any).conversation_id, m);
+        }
+      }
+
+      const now = Date.now();
+      const waiting = convs
+        .map((c: any) => {
+          const latest = latestByConv.get(c.id);
+          if (!latest || latest.direction !== "inbound") return null;
+          const hours = (now - new Date(latest.created_at).getTime()) / 3600000;
+          if (hours < minHours) return null;
+          const name = c.person
+            ? `${c.person.first_name ?? ""} ${c.person.last_name ?? ""}`.trim()
+            : "Unknown";
+          return {
+            person: name,
+            phone: c.person?.whatsapp_number ?? null,
+            last_inbound_at: latest.created_at,
+            last_inbound_preview: (latest.message_body ?? latest.body_text ?? "").slice(0, 80),
+            hours_waiting: Math.round(hours * 10) / 10,
+            conversation_id: c.id,
+            case_id: c.case_id,
+          };
+        })
+        .filter((x) => x !== null)
+        .sort((a: any, b: any) => b.hours_waiting - a.hours_waiting)
+        .slice(0, 20);
+
+      return { ok: true, data: waiting };
+    },
+  },
+  {
     name: "team_summary",
     description:
       "CEO only. Returns a count breakdown of priority cases by assignee (who has how many). Use this for questions about team workload.",

@@ -7,6 +7,7 @@ import {
   cmdCase,
   cmdConfirm,
   cmdEscalate,
+  cmdFind,
   cmdHelp,
   cmdMyCases,
   cmdNote,
@@ -194,6 +195,9 @@ async function handleAuthenticatedCommand(chatId: number, text: string): Promise
         break;
       case "/case":
         responseText = await cmdCase(scope, args);
+        break;
+      case "/find":
+        responseText = await cmdFind(scope, args);
         break;
       case "/status":
         responseText = await cmdStatus(scope);

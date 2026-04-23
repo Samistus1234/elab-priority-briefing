@@ -35,7 +35,8 @@ export async function cmdHelp(scope: Scope): Promise<string> {
     `*Read-only commands:*`,
     `• \`/mycases\` — your priority cases`,
     `• \`/stuck\` — priority cases stuck 7+ days`,
-    `• \`/case <ref>\` — full detail for one case (e.g. \`/case DFL-2181\`)`,
+    `• \`/case <ref-or-name>\` — full detail for one case`,
+    `• \`/find <query>\` — search by ref or client name (e.g. \`/find Zainab Oyelude\`)`,
     `• \`/status\` — your enrollment settings`,
     `• \`/help\` — this message`,
   ];
@@ -156,14 +157,23 @@ export async function cmdStuck(scope: Scope): Promise<string> {
 }
 
 export async function cmdCase(scope: Scope, args: string): Promise<string> {
-  const ref = args.trim().split(/\s+/)[0];
-  if (!ref) {
-    return "Usage: `/case <case-reference>` e.g. `/case DFL-2181` or `/case 2181`";
+  const rawInput = args.trim();
+  if (!rawInput) {
+    return "Usage: `/case <ref-or-client-name>`\nExamples:\n• `/case DFL-2181`\n• `/case Zainab Oyelude`";
   }
 
   const supabase = getSupabase();
   const cfg = loadConfig();
 
+  // If input has multiple whitespace-separated tokens AND doesn't look like a
+  // single case ref, treat it as a person-name search and return multi-hit list.
+  const tokens = rawInput.split(/\s+/).filter(Boolean);
+  const looksLikeRef = /^[A-Z]{2,5}[-_]\d/i.test(tokens[0]);
+  if (tokens.length > 1 && !looksLikeRef) {
+    return await findByPersonName(scope, rawInput);
+  }
+
+  const ref = tokens[0];
   const isUuid = /^[0-9a-f-]{36}$/i.test(ref);
   let query = supabase
     .from("cases")
@@ -242,6 +252,98 @@ export async function cmdCase(scope: Scope, args: string): Promise<string> {
 
   lines.push(``, `Open in Command Centre: ${cfg.commandCentreUrl}/cases/${c.id}`);
   return lines.join("\n");
+}
+
+/**
+ * Shared: search for cases by person first_name + last_name tokens.
+ * Used by /case when input is multi-token, and by /find.
+ */
+async function findByPersonName(scope: Scope, query: string): Promise<string> {
+  const supabase = getSupabase();
+  const cfg = loadConfig();
+
+  const tokens = query.split(/\s+/).filter((t) => t.length >= 2).map((t) => t.replace(/,/g, ""));
+  if (tokens.length === 0) return `Search term too short.`;
+
+  const orClauses: string[] = [];
+  for (const t of tokens) {
+    orClauses.push(`first_name.ilike.%${t}%`, `last_name.ilike.%${t}%`);
+  }
+
+  const { data: rawPersons } = await supabase
+    .from("persons")
+    .select("id, first_name, last_name")
+    .or(orClauses.join(","))
+    .limit(200);
+
+  if (!rawPersons || rawPersons.length === 0) {
+    return `No clients found matching \`${escapeMd(query)}\`.`;
+  }
+
+  const persons =
+    tokens.length > 1
+      ? rawPersons.filter((p: any) => {
+          const full = `${p.first_name ?? ""} ${p.last_name ?? ""}`.toLowerCase();
+          return tokens.every((t) => full.includes(t.toLowerCase()));
+        })
+      : rawPersons;
+
+  if (persons.length === 0) {
+    return `No clients found matching \`${escapeMd(query)}\`.`;
+  }
+
+  const personIds = persons.map((p: any) => p.id);
+  const { data: cases } = await supabase
+    .from("cases")
+    .select(`
+      id, case_reference, status, priority,
+      person:persons!cases_person_id_fkey(first_name, last_name),
+      assignee:users!cases_assigned_to_user_id_fkey(full_name),
+      pipeline:pipelines!cases_pipeline_id_fkey(name),
+      stage:pipeline_stages!cases_current_stage_id_fkey(name),
+      assigned_to_user_id
+    `)
+    .eq("org_id", cfg.supabase.orgId)
+    .eq("is_archived", false)
+    .in("person_id", personIds)
+    .order("updated_at", { ascending: false })
+    .limit(15);
+
+  if (!cases || cases.length === 0) {
+    return `Found ${persons.length} matching client(s) but no active cases.`;
+  }
+
+  if (cases.length === 1) {
+    // Single hit → render full detail directly
+    const c = cases[0] as any;
+    return await cmdCase(scope, c.case_reference ?? c.id);
+  }
+
+  const lines: string[] = [`Found *${cases.length}* cases matching \`${escapeMd(query)}\`:\n`];
+  for (const c of cases as any[]) {
+    const ref = c.case_reference ?? c.id.slice(0, 8);
+    const who = c.person
+      ? `${c.person.first_name ?? ""} ${c.person.last_name ?? ""}`.trim()
+      : "—";
+    const owner = c.assignee?.full_name ?? "Unassigned";
+    const pipe = c.pipeline?.name ? ` · ${c.pipeline.name}` : "";
+    lines.push(`• \`${escapeMd(ref)}\` — ${escapeMd(who)}${escapeMd(pipe)} · ${escapeMd(owner)}`);
+  }
+  lines.push(``, `Use \`/case <ref>\` for full detail.`);
+  return lines.join("\n");
+}
+
+export async function cmdFind(scope: Scope, args: string): Promise<string> {
+  const q = args.trim();
+  if (!q) {
+    return "Usage: `/find <query>` — searches case references AND client names.\nExamples:\n• `/find Zainab Oyelude`\n• `/find DFL-2181`\n• `/find Juliet`";
+  }
+  // If it looks like a case ref, fall through to /case
+  const firstToken = q.split(/\s+/)[0];
+  if (/^[A-Z]{2,5}[-_]\d/i.test(firstToken)) {
+    return await cmdCase(scope, q);
+  }
+  return await findByPersonName(scope, q);
 }
 
 export async function cmdStatus(scope: Scope): Promise<string> {

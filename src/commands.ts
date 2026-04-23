@@ -356,25 +356,9 @@ export async function cmdReply(
     return `Case \`${escapeMd(c.case_reference)}\` has no WhatsApp number on file. Use email instead via Command Centre.`;
   }
 
-  // Check 24h window — is there a client inbound in last 24h?
-  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
-  const { data: recentInbound } = await supabase
-    .from("activity_log")
-    .select("created_at")
-    .eq("entity_id", c.id)
-    .eq("entity_type", "case")
-    .eq("action", "message_received")
-    .gte("created_at", twentyFourHoursAgo)
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (!recentInbound || recentInbound.length === 0) {
-    return (
-      `⚠️ Client hasn't messaged in the last 24h — WhatsApp policy blocks free text.\n\n` +
-      `Use Command Centre to send via an approved template:\n` +
-      `${cfg.commandCentreUrl}/cases/${c.id}`
-    );
-  }
+  // NOTE: We no longer pre-check the 24h window. Meta is the source of truth —
+  // if the window is closed, the send will fail with error_subcode 131047 and
+  // cmdConfirm will surface a helpful message.
 
   const clientName = c.person
     ? `${c.person.first_name ?? ""} ${c.person.last_name ?? ""}`.trim()
@@ -397,7 +381,7 @@ export async function cmdReply(
     ``,
     `*To:* ${escapeMd(clientName)} (${escapeMd(phone)})`,
     `*Case:* \`${escapeMd(c.case_reference ?? c.id)}\``,
-    `*Via:* WhatsApp (within 24h window)`,
+    `*Via:* WhatsApp (free-text; requires 24h window open)`,
     ``,
     `*Message:*`,
     escapeMd(message),
@@ -448,7 +432,16 @@ export async function cmdConfirm(
     });
     const j: any = await resp.json().catch(() => ({}));
     if (!resp.ok) {
-      logger.error({ status: resp.status, err: j?.error?.message }, "reply send failed");
+      logger.error({ status: resp.status, err: j?.error?.message, subcode: j?.error?.error_subcode }, "reply send failed");
+      const subcode = j?.error?.error_subcode;
+      if (subcode === 131047 || /24 hour|re-engagement|outside.*window/i.test(j?.error?.message ?? "")) {
+        clearPendingReply(chatId);
+        return (
+          `⚠️ Client hasn't messaged in 24h — WhatsApp blocked the free-text send.\n\n` +
+          `Use Command Centre (template fallback) instead:\n` +
+          `${cfg.commandCentreUrl}/cases/${draft.case_id}`
+        );
+      }
       return `Failed to send: ${escapeMd(j?.error?.message ?? String(resp.status))}`;
     }
 

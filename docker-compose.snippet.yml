@@ -1,0 +1,17 @@
+# Add this service to the existing docker-compose.yml on the VPS
+# (alongside openclaw-el4v-openclaw-1). Do NOT replace the existing file.
+
+services:
+  elab-priority-briefing:
+    build: /root/elab-priority-briefing
+    container_name: elab-priority-briefing
+    restart: unless-stopped
+    env_file:
+      - /root/elab-priority-briefing/.env
+    volumes:
+      - /docker/priority-briefing-data:/data/priority-briefing
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "5"

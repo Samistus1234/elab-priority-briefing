@@ -121,33 +121,45 @@ export const tools: ToolDefinition[] = [
         return { ok: true, data: filtered };
       }
 
-      // Fallback: search person name. Split on whitespace so "Zainab Oyelude"
-      // matches both first_name='Zainab' and last_name='Oyelude' in different rows.
+      // Fallback: search person name via a two-step query (more reliable than
+      // PostgREST's foreign-table .or filter, which has been inconsistent).
+      // Split on whitespace so "Zainab Oyelude" matches a person whose
+      // first_name='Zainab' and last_name='Oyelude'.
       const tokens = query.split(/\s+/).filter((t) => t.length >= 2);
-      const orClauses: string[] = [];
+      const nameClauses: string[] = [];
       if (tokens.length === 0) {
-        orClauses.push(`first_name.ilike.%${query}%`, `last_name.ilike.%${query}%`);
+        nameClauses.push(`first_name.ilike.%${query}%`, `last_name.ilike.%${query}%`);
       } else {
         for (const t of tokens) {
-          const safe = t.replace(/,/g, ""); // commas break PostgREST .or()
-          orClauses.push(`first_name.ilike.%${safe}%`, `last_name.ilike.%${safe}%`);
+          const safe = t.replace(/,/g, "");
+          nameClauses.push(`first_name.ilike.%${safe}%`, `last_name.ilike.%${safe}%`);
         }
       }
+
+      const { data: persons } = await supabase
+        .from("persons")
+        .select("id, first_name, last_name")
+        .or(nameClauses.join(","))
+        .limit(50);
+
+      if (!persons || persons.length === 0) {
+        return { ok: true, data: [] };
+      }
+
+      const personIds = persons.map((p: any) => p.id);
 
       const { data: byName } = await supabase
         .from("cases")
         .select(`
           id, case_reference, status, priority, assigned_to_user_id,
-          person:persons!cases_person_id_fkey!inner(first_name, last_name),
+          person:persons!cases_person_id_fkey(first_name, last_name),
           assignee:users!cases_assigned_to_user_id_fkey(full_name),
           stage:pipeline_stages!cases_current_stage_id_fkey(name),
           pipeline:pipelines!cases_pipeline_id_fkey(name)
         `)
         .eq("org_id", cfg.supabase.orgId)
         .eq("is_archived", false)
-        .or(orClauses.join(","), {
-          foreignTable: "persons!cases_person_id_fkey",
-        })
+        .in("person_id", personIds)
         .limit(10);
 
       const result = byName ?? [];

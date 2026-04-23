@@ -315,7 +315,12 @@ export async function cmdReply(
 
   const match = args.trim().match(/^(\S+)\s+(.+)$/s);
   if (!match) {
-    return "Usage: `/reply <case-reference> <message>`\nExample: `/reply DFL-2181 Hi, following up on your transcript.`";
+    return (
+      "Usage: `/reply <case-ref-or-phone> <message>`\n" +
+      "Examples:\n" +
+      "• `/reply DFL-2181 Hi, following up on your transcript.`\n" +
+      "• `/reply 2348033723634 Hi, we're sorting this out today.`"
+    );
   }
   const [, ref, message] = match;
 
@@ -326,26 +331,89 @@ export async function cmdReply(
   const supabase = getSupabase();
   const cfg = loadConfig();
 
+  // Detect what kind of identifier the user passed:
+  // - UUID → direct case lookup
+  // - Phone (10+ digits, maybe +) → find person by whatsapp_number, most recent case
+  // - Otherwise → substring case_reference match
   const isUuid = /^[0-9a-f-]{36}$/i.test(ref);
-  let q = supabase
-    .from("cases")
-    .select(`
-      id, case_reference, assigned_to_user_id,
-      person:persons!cases_person_id_fkey(first_name, last_name, whatsapp_number)
-    `)
-    .eq("org_id", cfg.supabase.orgId);
-  q = isUuid ? q.eq("id", ref) : q.ilike("case_reference", `%${ref}%`);
-  const { data: cases, error } = await q.limit(5);
+  const cleanedPhone = ref.replace(/[^\d+]/g, "");
+  const isPhone = /^\+?\d{10,15}$/.test(cleanedPhone);
 
-  if (error || !cases || cases.length === 0) {
-    return `Case \`${escapeMd(ref)}\` not found.`;
+  let c: any = null;
+
+  if (isUuid) {
+    const { data } = await supabase
+      .from("cases")
+      .select(`
+        id, case_reference, assigned_to_user_id,
+        person:persons!cases_person_id_fkey(first_name, last_name, whatsapp_number)
+      `)
+      .eq("org_id", cfg.supabase.orgId)
+      .eq("id", ref)
+      .limit(1);
+    c = data?.[0] ?? null;
+  } else if (isPhone) {
+    // Phone lookup: try +prefix and no-prefix variants
+    const variants = [cleanedPhone];
+    if (cleanedPhone.startsWith("+")) variants.push(cleanedPhone.slice(1));
+    else variants.push("+" + cleanedPhone);
+
+    const { data: persons } = await supabase
+      .from("persons")
+      .select("id, first_name, last_name, whatsapp_number")
+      .in("whatsapp_number", variants)
+      .limit(10);
+
+    if (!persons || persons.length === 0) {
+      return `No client found with phone \`${escapeMd(ref)}\`. Check the number or use a case reference.`;
+    }
+
+    const personIds = persons.map((p: any) => p.id);
+    const { data: caseRows } = await supabase
+      .from("cases")
+      .select(`
+        id, case_reference, assigned_to_user_id,
+        person:persons!cases_person_id_fkey(first_name, last_name, whatsapp_number)
+      `)
+      .eq("org_id", cfg.supabase.orgId)
+      .eq("is_archived", false)
+      .in("status", ["active", "on_hold"])
+      .in("person_id", personIds)
+      .order("updated_at", { ascending: false })
+      .limit(5);
+
+    if (!caseRows || caseRows.length === 0) {
+      return (
+        `Phone \`${escapeMd(ref)}\` belongs to a known person but has no active case. ` +
+        `Use a case reference instead.`
+      );
+    }
+    if (caseRows.length > 1) {
+      const lines = [`Phone \`${escapeMd(ref)}\` is on multiple active cases. Use a ref to disambiguate:`];
+      for (const cr of caseRows) lines.push(`• \`${escapeMd((cr as any).case_reference ?? (cr as any).id)}\``);
+      return lines.join("\n");
+    }
+    c = caseRows[0];
+  } else {
+    const { data } = await supabase
+      .from("cases")
+      .select(`
+        id, case_reference, assigned_to_user_id,
+        person:persons!cases_person_id_fkey(first_name, last_name, whatsapp_number)
+      `)
+      .eq("org_id", cfg.supabase.orgId)
+      .ilike("case_reference", `%${ref}%`)
+      .limit(5);
+    if (!data || data.length === 0) return `Case \`${escapeMd(ref)}\` not found.`;
+    if (data.length > 1) {
+      const lines = [`Multiple cases match \`${escapeMd(ref)}\`. Be more specific:`];
+      for (const cr of data) lines.push(`• \`${escapeMd((cr as any).case_reference ?? (cr as any).id)}\``);
+      return lines.join("\n");
+    }
+    c = data[0];
   }
-  if (cases.length > 1) {
-    const lines = [`Multiple cases match \`${escapeMd(ref)}\`. Be more specific:`];
-    for (const c of cases) lines.push(`• \`${escapeMd((c as any).case_reference ?? (c as any).id)}\``);
-    return lines.join("\n");
-  }
-  const c = cases[0] as any;
+
+  if (!c) return `Case \`${escapeMd(ref)}\` not found.`;
 
   if (!scope.can_see_unassigned && c.assigned_to_user_id && !scope.visible_user_ids.includes(c.assigned_to_user_id)) {
     return `You don't have access to \`${escapeMd(ref)}\`.`;

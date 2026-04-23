@@ -25,7 +25,7 @@ const ConfigSchema = z.object({
   ESCALATION_SWEEP_CRON: z.string().default("0 */2 * * *"),
   CEO_HEALTH_CHECK_CRON: z.string().default("30 8 * * *"),
 
-  COMMAND_CENTRE_URL: z.string().url().default("https://elabcommandcentre.vercel.app"),
+  COMMAND_CENTRE_URL: z.string().url().default("https://app.elabsolution.org"),
 
   MAX_MESSAGES_PER_RUN: z.coerce.number().int().positive().default(30),
   NEGLECT_THRESHOLD_HOURS: z.coerce.number().int().positive().default(24),

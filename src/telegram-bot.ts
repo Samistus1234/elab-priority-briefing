@@ -1,6 +1,14 @@
 import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
 import { getSupabase } from "./supabase.js";
+import { findUserByChatId, resolveScopeForUser } from "./permissions.js";
+import {
+  cmdCase,
+  cmdHelp,
+  cmdMyCases,
+  cmdStatus,
+  cmdStuck,
+} from "./commands.js";
 
 /**
  * Long-polling Telegram bot that handles enrollment.
@@ -98,21 +106,12 @@ async function handleUpdate(upd: TelegramUpdate): Promise<void> {
       await handleStart(chatId, text);
     } else if (text.startsWith("/enroll")) {
       await handleEnroll(chatId, text);
-    } else if (text.startsWith("/status")) {
-      await handleStatus(chatId);
-    } else if (text.startsWith("/mycases")) {
-      await reply(
-        chatId,
-        "Interactive queries are coming in Phase 2. For now, you receive a daily priority brief at 8 AM WAT.",
-      );
     } else if (pendingEmailByChatId.get(chatId)?.awaiting && isEmail(text)) {
       await linkEmailToChat(chatId, text);
       pendingEmailByChatId.delete(chatId);
     } else {
-      await reply(
-        chatId,
-        "Hi! To enroll in ELAB ops priority briefings, send /start or /enroll <your-email>.",
-      );
+      // Everything else requires enrollment
+      await handleAuthenticatedCommand(chatId, text);
     }
   } catch (e) {
     logger.error({ err: (e as Error).message, chatId }, "handleUpdate error");
@@ -153,19 +152,61 @@ async function handleEnroll(chatId: number, text: string): Promise<void> {
   await linkEmailToChat(chatId, parts[1]);
 }
 
-async function handleStatus(chatId: number): Promise<void> {
-  const prefs = await findPrefsByChatId(chatId);
-  if (!prefs) {
-    await reply(chatId, "Not enrolled. Send /start to begin.");
+async function handleAuthenticatedCommand(chatId: number, text: string): Promise<void> {
+  const userId = await findUserByChatId(chatId);
+  if (!userId) {
+    await reply(
+      chatId,
+      "You're not enrolled yet. Send `/enroll your-email@elabsolution.org` to get started.",
+      "Markdown",
+    );
     return;
   }
-  const lines = [
-    `✅ Enrolled as *${escapeMd(prefs.email)}*`,
-    `Morning brief: ${prefs.morning_brief_enabled ? "ON" : "off"}`,
-    `Escalation nudges: ${prefs.escalation_nudges_enabled ? "ON" : "off"}`,
-    `Timezone: ${prefs.timezone}`,
-  ];
-  await reply(chatId, lines.join("\n"), "Markdown");
+
+  const scope = await resolveScopeForUser(userId);
+  if (!scope) {
+    await reply(chatId, "Your account seems to be inactive. Please contact an admin.");
+    return;
+  }
+
+  // Parse command and args
+  const parts = text.trim().split(/\s+/);
+  const cmd = parts[0].toLowerCase();
+  const args = parts.slice(1).join(" ");
+
+  let responseText: string;
+  try {
+    switch (cmd) {
+      case "/help":
+        responseText = await cmdHelp(scope);
+        break;
+      case "/mycases":
+        responseText = await cmdMyCases(scope);
+        break;
+      case "/stuck":
+        responseText = await cmdStuck(scope);
+        break;
+      case "/case":
+        responseText = await cmdCase(scope, args);
+        break;
+      case "/status":
+        responseText = await cmdStatus(scope);
+        break;
+      case "/note":
+      case "/reply":
+      case "/escalate":
+        responseText = `\`${cmd}\` is coming in a future update. For now you can use Command Centre to add notes / reply / escalate.`;
+        break;
+      default:
+        responseText =
+          `Unknown command: \`${escapeMd(cmd)}\`\n\nSend \`/help\` to see what's available.`;
+    }
+  } catch (e) {
+    logger.error({ err: (e as Error).message, cmd, userId }, "command handler crashed");
+    responseText = "Something went wrong running that command. The error has been logged.";
+  }
+
+  await reply(chatId, responseText, "Markdown");
 }
 
 async function linkEmailToChat(chatId: number, email: string): Promise<void> {

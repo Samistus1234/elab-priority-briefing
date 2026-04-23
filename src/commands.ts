@@ -40,9 +40,10 @@ export async function cmdHelp(scope: Scope): Promise<string> {
     `• \`/help\` — this message`,
   ];
 
-  if (scope.can_note) lines.push(`• \`/note <ref> <text>\` — _coming soon_`);
-  if (scope.can_reply) lines.push(`• \`/reply <ref> <message>\` — _coming soon_`);
-  if (scope.can_escalate) lines.push(`• \`/escalate <ref> <reason>\` — _coming soon_`);
+  lines.push(``, `*Action commands:*`);
+  if (scope.can_note) lines.push(`• \`/note <ref> <text>\` — add an internal note`);
+  if (scope.can_escalate) lines.push(`• \`/escalate <ref> <reason>\` — alert the CEO`);
+  if (scope.can_reply) lines.push(`• \`/reply <ref> <message>\` — _coming next_`);
 
   lines.push(``, `Natural-language questions: _coming soon_`);
 
@@ -255,6 +256,167 @@ export async function cmdStatus(scope: Scope): Promise<string> {
     lines.push(`Enrolled at: ${prefs.telegram_enrolled_at.slice(0, 10)}`);
   }
   return lines.join("\n");
+}
+
+/**
+ * /note <ref> <text>
+ * Looks up the case (with scope check), writes to case_notes. Low-risk.
+ */
+export async function cmdNote(scope: Scope, args: string): Promise<string> {
+  const match = args.trim().match(/^(\S+)\s+(.+)$/s);
+  if (!match) {
+    return "Usage: `/note <case-reference> <note text>`\nExample: `/note DFL-2181 Called client, awaiting transcript.`";
+  }
+  const [, ref, content] = match;
+
+  const supabase = getSupabase();
+  const cfg = loadConfig();
+
+  // Find the case
+  const isUuid = /^[0-9a-f-]{36}$/i.test(ref);
+  let q = supabase
+    .from("cases")
+    .select("id, case_reference, assigned_to_user_id")
+    .eq("org_id", cfg.supabase.orgId);
+  q = isUuid ? q.eq("id", ref) : q.ilike("case_reference", `%${ref}%`);
+  const { data: cases, error: caseErr } = await q.limit(5);
+
+  if (caseErr || !cases || cases.length === 0) {
+    return `Case \`${escapeMd(ref)}\` not found.`;
+  }
+  if (cases.length > 1) {
+    const lines = [`Multiple cases match \`${escapeMd(ref)}\`. Be more specific:`];
+    for (const c of cases) lines.push(`• \`${escapeMd((c as any).case_reference ?? (c as any).id)}\``);
+    return lines.join("\n");
+  }
+  const c = cases[0] as any;
+
+  // Scope check
+  if (!scope.can_see_unassigned && c.assigned_to_user_id && !scope.visible_user_ids.includes(c.assigned_to_user_id)) {
+    return `You don't have access to \`${escapeMd(ref)}\`.`;
+  }
+  if (!scope.can_see_unassigned && !c.assigned_to_user_id) {
+    return `You don't have access to unassigned cases.`;
+  }
+
+  if (!scope.can_note) {
+    return `You don't have permission to add notes.`;
+  }
+
+  const { error: noteErr } = await supabase.from("case_notes").insert({
+    case_id: c.id,
+    created_by_user_id: scope.user_id,
+    content,
+    is_client_visible: false,
+  });
+
+  if (noteErr) {
+    logger.error({ err: noteErr.message, case_id: c.id }, "cmdNote failed");
+    return `Failed to add note: ${escapeMd(noteErr.message)}`;
+  }
+
+  return `✅ Note added to \`${escapeMd(c.case_reference ?? c.id)}\`.`;
+}
+
+/**
+ * /escalate <ref> <reason>
+ * Sends a Telegram alert to the CEO about the given case.
+ */
+export async function cmdEscalate(scope: Scope, args: string): Promise<string> {
+  const match = args.trim().match(/^(\S+)\s+(.+)$/s);
+  if (!match) {
+    return "Usage: `/escalate <case-reference> <reason>`\nExample: `/escalate DFL-2181 Client is threatening to cancel — urgent.`";
+  }
+  const [, ref, reason] = match;
+
+  if (!scope.can_escalate) {
+    return `As CEO, you don't need to escalate to yourself. Use \`/note\` to record the concern.`;
+  }
+
+  const supabase = getSupabase();
+  const cfg = loadConfig();
+
+  // Find the case
+  const isUuid = /^[0-9a-f-]{36}$/i.test(ref);
+  let q = supabase
+    .from("cases")
+    .select(`
+      id, case_reference, priority, priority_reason, assigned_to_user_id,
+      person:persons!cases_person_id_fkey(first_name, last_name),
+      stage:pipeline_stages!cases_current_stage_id_fkey(name),
+      pipeline:pipelines!cases_pipeline_id_fkey(name)
+    `)
+    .eq("org_id", cfg.supabase.orgId);
+  q = isUuid ? q.eq("id", ref) : q.ilike("case_reference", `%${ref}%`);
+  const { data: cases, error: caseErr } = await q.limit(5);
+
+  if (caseErr || !cases || cases.length === 0) {
+    return `Case \`${escapeMd(ref)}\` not found.`;
+  }
+  if (cases.length > 1) {
+    const lines = [`Multiple cases match \`${escapeMd(ref)}\`. Be more specific:`];
+    for (const c of cases) lines.push(`• \`${escapeMd((c as any).case_reference ?? (c as any).id)}\``);
+    return lines.join("\n");
+  }
+  const c = cases[0] as any;
+
+  // Scope check
+  if (!scope.can_see_unassigned && c.assigned_to_user_id && !scope.visible_user_ids.includes(c.assigned_to_user_id)) {
+    return `You don't have access to \`${escapeMd(ref)}\`.`;
+  }
+
+  const who = c.person ? `${c.person.first_name ?? ""} ${c.person.last_name ?? ""}`.trim() : "—";
+
+  // Build CEO alert
+  const alertLines = [
+    `🚨 *Escalation from ${escapeMd(scope.full_name)}*`,
+    ``,
+    `*Case:* \`${escapeMd(c.case_reference ?? c.id)}\``,
+    `*Client:* ${escapeMd(who)}`,
+    `*Pipeline/Stage:* ${escapeMd(c.pipeline?.name ?? "—")} / ${escapeMd(c.stage?.name ?? "—")}`,
+    `*Current priority:* ${escapeMd(c.priority)}${c.priority_reason ? ` (${escapeMd(c.priority_reason)})` : ""}`,
+    ``,
+    `*Reason:*`,
+    escapeMd(reason),
+    ``,
+    `Open: ${cfg.commandCentreUrl}/cases/${c.id}`,
+  ];
+
+  // Send via Telegram to CEO
+  const telegramResp = await fetch(
+    `https://api.telegram.org/bot${cfg.telegram.botToken}/sendMessage`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        chat_id: cfg.telegram.ceoChatId,
+        text: alertLines.join("\n"),
+        parse_mode: "Markdown",
+        disable_web_page_preview: true,
+      }),
+    },
+  );
+
+  if (!telegramResp.ok) {
+    logger.error({ status: telegramResp.status, case_id: c.id }, "escalation Telegram send failed");
+    return `Failed to send escalation. Please try again.`;
+  }
+
+  // Also record it as a case_note so there's an audit trail
+  await supabase
+    .from("case_notes")
+    .insert({
+      case_id: c.id,
+      created_by_user_id: scope.user_id,
+      content: `[ESCALATED TO CEO] ${reason}`,
+      is_client_visible: false,
+      title: "Escalation",
+    })
+    .then(({ error }) => {
+      if (error) logger.error({ err: error.message }, "escalation note insert failed");
+    });
+
+  return `✅ Escalation sent to CEO for \`${escapeMd(c.case_reference ?? c.id)}\`.\nA note was also added to the case for audit.`;
 }
 
 function escapeMd(s: string): string {

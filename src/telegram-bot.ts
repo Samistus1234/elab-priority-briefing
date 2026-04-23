@@ -4,8 +4,10 @@ import { getSupabase } from "./supabase.js";
 import { findUserByChatId, resolveScopeForUser } from "./permissions.js";
 import {
   cmdCase,
+  cmdEscalate,
   cmdHelp,
   cmdMyCases,
+  cmdNote,
   cmdStatus,
   cmdStuck,
 } from "./commands.js";
@@ -193,9 +195,13 @@ async function handleAuthenticatedCommand(chatId: number, text: string): Promise
         responseText = await cmdStatus(scope);
         break;
       case "/note":
-      case "/reply":
+        responseText = await cmdNote(scope, args);
+        break;
       case "/escalate":
-        responseText = `\`${cmd}\` is coming in a future update. For now you can use Command Centre to add notes / reply / escalate.`;
+        responseText = await cmdEscalate(scope, args);
+        break;
+      case "/reply":
+        responseText = `\`/reply\` is coming in the next round. For now, send the message directly via Command Centre.`;
         break;
       default:
         responseText =

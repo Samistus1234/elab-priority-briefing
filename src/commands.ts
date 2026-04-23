@@ -165,11 +165,12 @@ export async function cmdCase(scope: Scope, args: string): Promise<string> {
   const supabase = getSupabase();
   const cfg = loadConfig();
 
-  // If input has multiple whitespace-separated tokens AND doesn't look like a
-  // single case ref, treat it as a person-name search and return multi-hit list.
+  // If input doesn't look like a case ref pattern (letters-digits, like
+  // DFL-2181 or MMP-0873), treat it as a person-name search regardless of
+  // token count. Single-token names like "Funso" should still work.
   const tokens = rawInput.split(/\s+/).filter(Boolean);
   const looksLikeRef = /^[A-Z]{2,5}[-_]\d/i.test(tokens[0]);
-  if (tokens.length > 1 && !looksLikeRef) {
+  if (!looksLikeRef && !/^[0-9a-f-]{36}$/i.test(tokens[0])) {
     return await findByPersonName(scope, rawInput);
   }
 

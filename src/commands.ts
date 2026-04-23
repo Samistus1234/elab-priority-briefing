@@ -22,10 +22,10 @@ const REASON_LABELS: Record<string, string> = {
 export async function cmdHelp(scope: Scope): Promise<string> {
   const roleBlurb =
     scope.role === "ceo"
-      ? "You are logged in as CEO — full access."
+      ? "You are logged in as CEO — full access, can archive/reassign."
       : scope.role === "lead"
-        ? `You are logged in as team lead (${scope.visible_user_ids.length - 1} direct reports).`
-        : "You are logged in as staff — you see your own cases.";
+        ? `You are logged in as team lead (${scope.visible_user_ids.length - 1} direct reports). Full read/write access to all cases.`
+        : "You are logged in as staff — full read/write access to all cases across the org.";
 
   const lines = [
     `🤖 *ELAB Ops Team Bot — help*`,

@@ -55,7 +55,7 @@ export async function resolveScopeForUser(userId: string): Promise<Scope | null>
 
   const isCeo = CEO_USER_IDS.includes(userId);
 
-  // Direct reports (for lead detection)
+  // Lead detection (kept for display purposes only, since scope is now flat)
   const { data: reports } = await supabase
     .from("users")
     .select("id")
@@ -67,19 +67,15 @@ export async function resolveScopeForUser(userId: string): Promise<Scope | null>
 
   const role: Role = isCeo ? "ceo" : isLead ? "lead" : "staff";
 
-  // Visible set
-  let visible_user_ids: string[];
-  let can_see_unassigned = false;
-  if (isCeo) {
-    // CEO sees all active staff — fetch once
-    const { data: all } = await supabase.from("users").select("id").eq("is_active", true);
-    visible_user_ids = (all ?? []).map((u: any) => u.id);
-    can_see_unassigned = true;
-  } else if (isLead) {
-    visible_user_ids = [userId, ...reportIds];
-  } else {
-    visible_user_ids = [userId];
-  }
+  // FLAT model: every active user sees every active user's cases.
+  // This mirrors how ELAB staff already operate in Command Centre — they
+  // routinely cover for each other and look up any case. Tight scoping
+  // would just push them back to the web UI.
+  const { data: allUsers } = await supabase
+    .from("users")
+    .select("id")
+    .eq("is_active", true);
+  const visible_user_ids: string[] = (allUsers ?? []).map((u: any) => u.id);
 
   return {
     user_id: userId,
@@ -87,10 +83,10 @@ export async function resolveScopeForUser(userId: string): Promise<Scope | null>
     email: me.email,
     role,
     visible_user_ids,
-    can_see_unassigned,
-    can_reply: isCeo || isLead, // staff can't reply in v1 (too risky)
-    can_note: true, // everyone can note their visible cases
-    can_escalate: !isCeo, // CEO doesn't escalate to self
+    can_see_unassigned: true, // everyone can see unassigned cases
+    can_reply: true,          // everyone can draft + /confirm a WhatsApp reply
+    can_note: true,           // everyone can note any case
+    can_escalate: !isCeo,     // CEO doesn't escalate to self
   };
 }
 

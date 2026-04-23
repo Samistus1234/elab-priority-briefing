@@ -121,7 +121,19 @@ export const tools: ToolDefinition[] = [
         return { ok: true, data: filtered };
       }
 
-      // Fallback: search person name
+      // Fallback: search person name. Split on whitespace so "Zainab Oyelude"
+      // matches both first_name='Zainab' and last_name='Oyelude' in different rows.
+      const tokens = query.split(/\s+/).filter((t) => t.length >= 2);
+      const orClauses: string[] = [];
+      if (tokens.length === 0) {
+        orClauses.push(`first_name.ilike.%${query}%`, `last_name.ilike.%${query}%`);
+      } else {
+        for (const t of tokens) {
+          const safe = t.replace(/,/g, ""); // commas break PostgREST .or()
+          orClauses.push(`first_name.ilike.%${safe}%`, `last_name.ilike.%${safe}%`);
+        }
+      }
+
       const { data: byName } = await supabase
         .from("cases")
         .select(`
@@ -133,7 +145,7 @@ export const tools: ToolDefinition[] = [
         `)
         .eq("org_id", cfg.supabase.orgId)
         .eq("is_archived", false)
-        .or(`first_name.ilike.%${query}%,last_name.ilike.%${query}%`, {
+        .or(orClauses.join(","), {
           foreignTable: "persons!cases_person_id_fkey",
         })
         .limit(10);

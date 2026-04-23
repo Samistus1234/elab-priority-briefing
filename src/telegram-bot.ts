@@ -3,11 +3,14 @@ import { logger } from "./logger.js";
 import { getSupabase } from "./supabase.js";
 import { findUserByChatId, resolveScopeForUser } from "./permissions.js";
 import {
+  cmdCancel,
   cmdCase,
+  cmdConfirm,
   cmdEscalate,
   cmdHelp,
   cmdMyCases,
   cmdNote,
+  cmdReply,
   cmdStatus,
   cmdStuck,
 } from "./commands.js";
@@ -201,7 +204,13 @@ async function handleAuthenticatedCommand(chatId: number, text: string): Promise
         responseText = await cmdEscalate(scope, args);
         break;
       case "/reply":
-        responseText = `\`/reply\` is coming in the next round. For now, send the message directly via Command Centre.`;
+        responseText = await cmdReply(scope, chatId, args);
+        break;
+      case "/confirm":
+        responseText = await cmdConfirm(scope, chatId);
+        break;
+      case "/cancel":
+        responseText = await cmdCancel(scope, chatId);
         break;
       default:
         responseText =

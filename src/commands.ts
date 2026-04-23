@@ -43,7 +43,11 @@ export async function cmdHelp(scope: Scope): Promise<string> {
   lines.push(``, `*Action commands:*`);
   if (scope.can_note) lines.push(`• \`/note <ref> <text>\` — add an internal note`);
   if (scope.can_escalate) lines.push(`• \`/escalate <ref> <reason>\` — alert the CEO`);
-  if (scope.can_reply) lines.push(`• \`/reply <ref> <message>\` — _coming next_`);
+  if (scope.can_reply) {
+    lines.push(`• \`/reply <ref> <message>\` — WhatsApp reply to client (requires \`/confirm\`)`);
+    lines.push(`• \`/confirm\` — send pending reply draft`);
+    lines.push(`• \`/cancel\` — discard pending reply draft`);
+  }
 
   lines.push(``, `Natural-language questions: _coming soon_`);
 
@@ -256,6 +260,236 @@ export async function cmdStatus(scope: Scope): Promise<string> {
     lines.push(`Enrolled at: ${prefs.telegram_enrolled_at.slice(0, 10)}`);
   }
   return lines.join("\n");
+}
+
+// ============================================================================
+// /reply flow — in-memory pending drafts
+// ============================================================================
+
+type PendingReply = {
+  chat_id: number;
+  user_id: string;
+  case_id: string;
+  case_ref: string;
+  client_phone: string;
+  client_name: string;
+  message: string;
+  created_at: number;
+};
+
+const DRAFT_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+const pendingReplies = new Map<number, PendingReply>();
+
+function purgeExpired(): void {
+  const now = Date.now();
+  for (const [chatId, draft] of pendingReplies) {
+    if (now - draft.created_at > DRAFT_TTL_MS) pendingReplies.delete(chatId);
+  }
+}
+
+export function getPendingReply(chatId: number): PendingReply | null {
+  purgeExpired();
+  return pendingReplies.get(chatId) ?? null;
+}
+
+export function clearPendingReply(chatId: number): void {
+  pendingReplies.delete(chatId);
+}
+
+/**
+ * /reply <ref> <message>
+ * Shows preview + asks for /confirm. Scope-checked. Requires 24h window with client.
+ */
+export async function cmdReply(
+  scope: Scope,
+  chatId: number,
+  args: string,
+): Promise<string> {
+  if (!scope.can_reply) {
+    return "You don't have permission to send client replies.";
+  }
+
+  const match = args.trim().match(/^(\S+)\s+(.+)$/s);
+  if (!match) {
+    return "Usage: `/reply <case-reference> <message>`\nExample: `/reply DFL-2181 Hi, following up on your transcript.`";
+  }
+  const [, ref, message] = match;
+
+  if (message.length > 1000) {
+    return "Message too long (max 1000 chars). Shorten it or use Command Centre.";
+  }
+
+  const supabase = getSupabase();
+  const cfg = loadConfig();
+
+  const isUuid = /^[0-9a-f-]{36}$/i.test(ref);
+  let q = supabase
+    .from("cases")
+    .select(`
+      id, case_reference, assigned_to_user_id,
+      person:persons!cases_person_id_fkey(first_name, last_name, whatsapp_number)
+    `)
+    .eq("org_id", cfg.supabase.orgId);
+  q = isUuid ? q.eq("id", ref) : q.ilike("case_reference", `%${ref}%`);
+  const { data: cases, error } = await q.limit(5);
+
+  if (error || !cases || cases.length === 0) {
+    return `Case \`${escapeMd(ref)}\` not found.`;
+  }
+  if (cases.length > 1) {
+    const lines = [`Multiple cases match \`${escapeMd(ref)}\`. Be more specific:`];
+    for (const c of cases) lines.push(`• \`${escapeMd((c as any).case_reference ?? (c as any).id)}\``);
+    return lines.join("\n");
+  }
+  const c = cases[0] as any;
+
+  if (!scope.can_see_unassigned && c.assigned_to_user_id && !scope.visible_user_ids.includes(c.assigned_to_user_id)) {
+    return `You don't have access to \`${escapeMd(ref)}\`.`;
+  }
+  if (!scope.can_see_unassigned && !c.assigned_to_user_id) {
+    return `You don't have access to unassigned cases.`;
+  }
+
+  const phone = c.person?.whatsapp_number;
+  if (!phone) {
+    return `Case \`${escapeMd(c.case_reference)}\` has no WhatsApp number on file. Use email instead via Command Centre.`;
+  }
+
+  // Check 24h window — is there a client inbound in last 24h?
+  const twentyFourHoursAgo = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+  const { data: recentInbound } = await supabase
+    .from("activity_log")
+    .select("created_at")
+    .eq("entity_id", c.id)
+    .eq("entity_type", "case")
+    .eq("action", "message_received")
+    .gte("created_at", twentyFourHoursAgo)
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (!recentInbound || recentInbound.length === 0) {
+    return (
+      `⚠️ Client hasn't messaged in the last 24h — WhatsApp policy blocks free text.\n\n` +
+      `Use Command Centre to send via an approved template:\n` +
+      `${cfg.commandCentreUrl}/cases/${c.id}`
+    );
+  }
+
+  const clientName = c.person
+    ? `${c.person.first_name ?? ""} ${c.person.last_name ?? ""}`.trim()
+    : "—";
+
+  // Stash pending draft
+  pendingReplies.set(chatId, {
+    chat_id: chatId,
+    user_id: scope.user_id,
+    case_id: c.id,
+    case_ref: c.case_reference ?? c.id,
+    client_phone: phone,
+    client_name: clientName,
+    message,
+    created_at: Date.now(),
+  });
+
+  return [
+    `📤 *Reply preview*`,
+    ``,
+    `*To:* ${escapeMd(clientName)} (${escapeMd(phone)})`,
+    `*Case:* \`${escapeMd(c.case_reference ?? c.id)}\``,
+    `*Via:* WhatsApp (within 24h window)`,
+    ``,
+    `*Message:*`,
+    escapeMd(message),
+    ``,
+    `Send \`/confirm\` to deliver, or \`/cancel\` to discard.`,
+    `Draft expires in 5 minutes.`,
+  ].join("\n");
+}
+
+/** Send the pending draft. Returns the response text. */
+export async function cmdConfirm(
+  scope: Scope,
+  chatId: number,
+): Promise<string> {
+  const draft = getPendingReply(chatId);
+  if (!draft) {
+    return "No pending reply to confirm. Start one with `/reply <ref> <message>`.";
+  }
+  if (draft.user_id !== scope.user_id) {
+    clearPendingReply(chatId);
+    return "That draft doesn't belong to you. Discarded.";
+  }
+
+  const cfg = loadConfig();
+  const supabase = getSupabase();
+
+  if (cfg.dryRun || !cfg.whatsappLive) {
+    clearPendingReply(chatId);
+    return `✅ [DRY RUN] Would send to ${escapeMd(draft.client_name)} for \`${escapeMd(draft.case_ref)}\`.\n\nWhatsApp isn't live yet — flip WHATSAPP_LIVE=true to actually send.`;
+  }
+
+  // Send via Meta Graph API
+  const url = `https://graph.facebook.com/v21.0/${cfg.meta.phoneNumberId}/messages`;
+  try {
+    const resp = await fetch(url, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${cfg.meta.token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        recipient_type: "individual",
+        to: draft.client_phone,
+        type: "text",
+        text: { body: draft.message },
+      }),
+    });
+    const j: any = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      logger.error({ status: resp.status, err: j?.error?.message }, "reply send failed");
+      return `Failed to send: ${escapeMd(j?.error?.message ?? String(resp.status))}`;
+    }
+
+    const messageId = j?.messages?.[0]?.id ?? "unknown";
+
+    // Log outbound in activity_log so priority engine sees the case as "touched"
+    await supabase
+      .from("activity_log")
+      .insert({
+        org_id: cfg.supabase.orgId,
+        user_id: draft.user_id,
+        action: "whatsapp_message_sent",
+        entity_type: "case",
+        entity_id: draft.case_id,
+        metadata: {
+          to: draft.client_phone,
+          caseId: draft.case_id,
+          messageId,
+          source: "telegram_bot",
+        },
+      })
+      .then(({ error }) => {
+        if (error) logger.error({ err: error.message }, "activity_log insert failed");
+      });
+
+    clearPendingReply(chatId);
+    return `✅ Sent to ${escapeMd(draft.client_name)} on \`${escapeMd(draft.case_ref)}\`.`;
+  } catch (e) {
+    logger.error({ err: (e as Error).message }, "reply send crashed");
+    return `Network error sending reply. Draft is still pending — try \`/confirm\` again.`;
+  }
+}
+
+export async function cmdCancel(
+  scope: Scope,
+  chatId: number,
+): Promise<string> {
+  const draft = getPendingReply(chatId);
+  if (!draft) return "No pending draft to cancel.";
+  clearPendingReply(chatId);
+  return `Draft for \`${escapeMd(draft.case_ref)}\` discarded.`;
 }
 
 /**

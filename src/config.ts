@@ -31,6 +31,11 @@ const ConfigSchema = z.object({
   NEGLECT_THRESHOLD_HOURS: z.coerce.number().int().positive().default(24),
 
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
+
+  // LLM (Phase 2b Round 3) — optional. If missing, NL questions fall back to help.
+  ANTHROPIC_API_KEY: z.string().optional(),
+  ANTHROPIC_MODEL: z.string().default("claude-sonnet-4-6"),
+  LLM_MAX_QUERIES_PER_HOUR: z.coerce.number().int().positive().default(30),
 });
 
 export type AppConfig = {
@@ -55,6 +60,11 @@ export type AppConfig = {
   maxMessagesPerRun: number;
   neglectThresholdHours: number;
   logLevel: "debug" | "info" | "warn" | "error";
+  llm: {
+    apiKey: string | null;
+    model: string;
+    maxQueriesPerHour: number;
+  };
 };
 
 let cached: AppConfig | null = null;
@@ -97,6 +107,11 @@ export function loadConfig(): AppConfig {
     maxMessagesPerRun: e.MAX_MESSAGES_PER_RUN,
     neglectThresholdHours: e.NEGLECT_THRESHOLD_HOURS,
     logLevel: e.LOG_LEVEL,
+    llm: {
+      apiKey: e.ANTHROPIC_API_KEY ?? null,
+      model: e.ANTHROPIC_MODEL,
+      maxQueriesPerHour: e.LLM_MAX_QUERIES_PER_HOUR,
+    },
   };
   return cached;
 }

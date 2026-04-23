@@ -49,7 +49,10 @@ export async function cmdHelp(scope: Scope): Promise<string> {
     lines.push(`• \`/cancel\` — discard pending reply draft`);
   }
 
-  lines.push(``, `Natural-language questions: _coming soon_`);
+  lines.push(
+    ``,
+    `*Natural-language:* just type your question, e.g. "what's stuck on my desk?" or "show me Zainab's case".`,
+  );
 
   return lines.join("\n");
 }

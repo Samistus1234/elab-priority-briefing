@@ -14,6 +14,7 @@ import {
   cmdStatus,
   cmdStuck,
 } from "./commands.js";
+import { askLLM } from "./llm-router.js";
 
 /**
  * Long-polling Telegram bot that handles enrollment.
@@ -213,8 +214,13 @@ async function handleAuthenticatedCommand(chatId: number, text: string): Promise
         responseText = await cmdCancel(scope, chatId);
         break;
       default:
-        responseText =
-          `Unknown command: \`${escapeMd(cmd)}\`\n\nSend \`/help\` to see what's available.`;
+        // Treat non-slash free text as a natural-language question → LLM router
+        if (!cmd.startsWith("/")) {
+          responseText = await askLLM(scope, text.trim());
+        } else {
+          responseText =
+            `Unknown command: \`${escapeMd(cmd)}\`\n\nSend \`/help\` to see what's available.`;
+        }
     }
   } catch (e) {
     logger.error({ err: (e as Error).message, cmd, userId }, "command handler crashed");

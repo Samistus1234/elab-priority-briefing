@@ -150,13 +150,14 @@ export async function cmdStuck(scope: Scope): Promise<string> {
 export async function cmdCase(scope: Scope, args: string): Promise<string> {
   const ref = args.trim().split(/\s+/)[0];
   if (!ref) {
-    return "Usage: `/case <case-reference>` e.g. `/case DFL-2181`";
+    return "Usage: `/case <case-reference>` e.g. `/case DFL-2181` or `/case 2181`";
   }
 
   const supabase = getSupabase();
   const cfg = loadConfig();
 
-  const { data: cases, error } = await supabase
+  const isUuid = /^[0-9a-f-]{36}$/i.test(ref);
+  let query = supabase
     .from("cases")
     .select(`
       id, case_reference, priority, priority_reason, priority_set_at, status,
@@ -166,12 +167,33 @@ export async function cmdCase(scope: Scope, args: string): Promise<string> {
       stage:pipeline_stages!cases_current_stage_id_fkey(name),
       pipeline:pipelines!cases_pipeline_id_fkey(name)
     `)
-    .eq("org_id", cfg.supabase.orgId)
-    .or(`case_reference.ilike.${ref}%,id.eq.${ref.match(/^[0-9a-f-]{36}$/i) ? ref : "00000000-0000-0000-0000-000000000000"}`)
-    .limit(1);
+    .eq("org_id", cfg.supabase.orgId);
+
+  if (isUuid) {
+    query = query.eq("id", ref);
+  } else {
+    // Substring match on case_reference (case-insensitive)
+    query = query.ilike("case_reference", `%${ref}%`);
+  }
+
+  const { data: cases, error } = await query.order("created_at", { ascending: false }).limit(5);
 
   if (error || !cases || cases.length === 0) {
     return `Case \`${escapeMd(ref)}\` not found.`;
+  }
+
+  // If multiple matches, list them and ask user to be more specific
+  if (cases.length > 1) {
+    const lines = [`Found ${cases.length} cases matching \`${escapeMd(ref)}\`:`, ``];
+    for (const c of cases) {
+      const r = (c as any).case_reference ?? (c as any).id.slice(0, 8);
+      const who = (c as any).person
+        ? `${(c as any).person.first_name ?? ""} ${(c as any).person.last_name ?? ""}`.trim()
+        : "—";
+      lines.push(`• \`${escapeMd(r)}\` — ${escapeMd(who)}`);
+    }
+    lines.push(``, `Use a more specific reference.`);
+    return lines.join("\n");
   }
 
   const c = cases[0] as any;

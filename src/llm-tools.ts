@@ -136,13 +136,27 @@ export const tools: ToolDefinition[] = [
         }
       }
 
-      const { data: persons } = await supabase
+      const { data: rawPersons } = await supabase
         .from("persons")
         .select("id, first_name, last_name")
         .or(nameClauses.join(","))
-        .limit(50);
+        .limit(200);
 
-      if (!persons || persons.length === 0) {
+      if (!rawPersons || rawPersons.length === 0) {
+        return { ok: true, data: [] };
+      }
+
+      // For multi-token queries, require ALL tokens to appear in the full name
+      // (prevents drowning in single-token matches for common names like "Zainab").
+      const persons =
+        tokens.length > 1
+          ? rawPersons.filter((p: any) => {
+              const fullName = `${p.first_name ?? ""} ${p.last_name ?? ""}`.toLowerCase();
+              return tokens.every((t) => fullName.includes(t.toLowerCase()));
+            })
+          : rawPersons;
+
+      if (persons.length === 0) {
         return { ok: true, data: [] };
       }
 

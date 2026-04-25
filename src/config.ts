@@ -31,9 +31,9 @@ const ConfigSchema = z.object({
 
   MAX_MESSAGES_PER_RUN: z.coerce.number().int().positive().default(30),
   // Hours of no outbound client contact before a priority case escalates.
-  // Was 24h — too aggressive, every priority case crossed it. 48h gives one
-  // full working day of grace.
-  NEGLECT_THRESHOLD_HOURS: z.coerce.number().int().positive().default(48),
+  // Was 24h — too aggressive, every priority case crossed it. 72h gives
+  // three working days of grace before the Telegram nag fires.
+  NEGLECT_THRESHOLD_HOURS: z.coerce.number().int().positive().default(72),
 
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 

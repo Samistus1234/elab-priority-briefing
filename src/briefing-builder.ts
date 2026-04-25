@@ -100,6 +100,7 @@ export function buildCeoRollup(
   neglectedCases: CaseLite[],
   assigneeNames: Map<string, string>,
   ceoChatId: string,
+  neglectThresholdHours: number,
 ): TelegramPayload {
   const today = new Date().toISOString().slice(0, 10);
   const totalPriority = Array.from(allByAssignee.values()).reduce((s, v) => s + v.length, 0);
@@ -109,7 +110,7 @@ export function buildCeoRollup(
   lines.push(`Date: ${today}`);
   lines.push(``);
   lines.push(`*Total priority: ${totalPriority} cases across ${allByAssignee.size} assignment(s)*`);
-  lines.push(`*Total neglected (>24h no outbound): ${neglectedCases.length}* ${neglectedCases.length > 0 ? "⚠️" : "✅"}`);
+  lines.push(`*Total neglected (>${neglectThresholdHours}h no outbound): ${neglectedCases.length}* ${neglectedCases.length > 0 ? "⚠️" : "✅"}`);
   lines.push(``);
 
   // Per-staff breakdown
@@ -250,6 +251,7 @@ export function buildEscalationNudgeTelegram(
   staff: StaffUser,
   neglectedCase: CaseLite,
   commandCentreUrl: string,
+  neglectThresholdHours: number,
 ): EscalationTelegramPayload | null {
   if (!staff.telegram_chat_id) return null;
 
@@ -261,7 +263,7 @@ export function buildEscalationNudgeTelegram(
   const lines = [
     `⚠️ *Escalation — ${escapeMd(firstName)}*`,
     ``,
-    `Case \`${escapeMd(ref)}\` (${escapeMd(who)}${escapeMd(stage)}) has not had outbound client contact in over 24 hours.`,
+    `Case \`${escapeMd(ref)}\` (${escapeMd(who)}${escapeMd(stage)}) has not had outbound client contact in over ${neglectThresholdHours} hours.`,
     ``,
     `Please action today, or mark it on hold with a reason.`,
     ``,

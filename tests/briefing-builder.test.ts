@@ -90,7 +90,7 @@ describe("buildCeoRollup", () => {
       ["u1", "Bukola Bunmi"],
       ["u2", "Helen Ehinmisan"],
     ]);
-    const result = buildCeoRollup(byAssignee, [cases[0]], names, "12345");
+    const result = buildCeoRollup(byAssignee, [cases[0]], names, "12345", 48);
     expect(result.chat_id).toBe("12345");
     expect(result.parse_mode).toBe("Markdown");
     expect(result.text).toContain("Priority Cases");
@@ -104,14 +104,14 @@ describe("buildCeoRollup", () => {
   it("shows ✅ when zero neglected", () => {
     const cases = [makeCase()];
     const byAssignee = new Map([["u1", cases]]);
-    const result = buildCeoRollup(byAssignee, [], new Map([["u1", "Bukola Bunmi"]]), "12345");
+    const result = buildCeoRollup(byAssignee, [], new Map([["u1", "Bukola Bunmi"]]), "12345", 48);
     expect(result.text).toContain("✅");
   });
 
   it("shows ⚠️ when neglected > 0", () => {
     const cases = [makeCase()];
     const byAssignee = new Map([["u1", cases]]);
-    const result = buildCeoRollup(byAssignee, cases, new Map([["u1", "Bukola Bunmi"]]), "12345");
+    const result = buildCeoRollup(byAssignee, cases, new Map([["u1", "Bukola Bunmi"]]), "12345", 48);
     expect(result.text).toContain("⚠️");
   });
 });
@@ -155,14 +155,14 @@ describe("buildStaffBriefTelegram", () => {
 
 describe("buildEscalationNudgeTelegram", () => {
   it("returns null without telegram_chat_id", () => {
-    const result = buildEscalationNudgeTelegram(staff, makeCase(), "https://cc");
+    const result = buildEscalationNudgeTelegram(staff, makeCase(), "https://cc", 48);
     expect(result).toBeNull();
   });
 
   it("builds a Telegram escalation payload", () => {
     const s: StaffUser = { ...staff, telegram_chat_id: "12345" };
     const c = makeCase();
-    const result = buildEscalationNudgeTelegram(s, c, "https://cc");
+    const result = buildEscalationNudgeTelegram(s, c, "https://cc", 48);
     expect(result).not.toBeNull();
     expect(result!.chat_id).toBe("12345");
     expect(result!.case_id).toBe("case-uuid-1");

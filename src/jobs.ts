@@ -82,7 +82,7 @@ export async function runMorningBrief(): Promise<void> {
     }
   }
 
-  const rollup = buildCeoRollup(byAssignee, neglected, assigneeNames, cfg.telegram.ceoChatId);
+  const rollup = buildCeoRollup(byAssignee, neglected, assigneeNames, cfg.telegram.ceoChatId, cfg.neglectThresholdHours);
   const rollupResult = await dispatcher.sendTelegram(rollup);
   await dispatcher.log({
     jobType: "ceo_rollup",
@@ -210,7 +210,7 @@ export async function runEscalationSweep(): Promise<void> {
     if (await dispatcher.caseNudgedToday(c.id)) continue;
 
     if (staff.telegram_chat_id) {
-      const payload = buildEscalationNudgeTelegram(staff, c, cfg.commandCentreUrl);
+      const payload = buildEscalationNudgeTelegram(staff, c, cfg.commandCentreUrl, cfg.neglectThresholdHours);
       if (payload) {
         const result = await dispatcher.sendTelegram({
           chat_id: payload.chat_id,
@@ -237,7 +237,7 @@ export async function runEscalationSweep(): Promise<void> {
       const ref = c.case_reference ?? c.id.slice(0, 8);
       const who = c.person_full_name ?? "—";
       const details =
-        `Case ${ref} (${who}) has not had client contact in 24h+. ` +
+        `Case ${ref} (${who}) has not had client contact in ${cfg.neglectThresholdHours}h+. ` +
         `Please action today.`.slice(0, 200);
 
       const result = await dispatcher.sendWhatsApp({

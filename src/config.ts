@@ -22,13 +22,18 @@ const ConfigSchema = z.object({
 
   TZ: z.string().default("Africa/Lagos"),
   MORNING_BRIEF_CRON: z.string().default("0 8 * * *"),
-  ESCALATION_SWEEP_CRON: z.string().default("0 */2 * * *"),
+  // Escalation sweep runs once per day mid-morning. Dedup is per-UTC-day, so
+  // running more frequently doesn't increase nag rate — it just adds log noise.
+  ESCALATION_SWEEP_CRON: z.string().default("0 11 * * *"),
   CEO_HEALTH_CHECK_CRON: z.string().default("30 8 * * *"),
 
   COMMAND_CENTRE_URL: z.string().url().default("https://app.elabsolution.org"),
 
   MAX_MESSAGES_PER_RUN: z.coerce.number().int().positive().default(30),
-  NEGLECT_THRESHOLD_HOURS: z.coerce.number().int().positive().default(24),
+  // Hours of no outbound client contact before a priority case escalates.
+  // Was 24h — too aggressive, every priority case crossed it. 48h gives one
+  // full working day of grace.
+  NEGLECT_THRESHOLD_HOURS: z.coerce.number().int().positive().default(48),
 
   LOG_LEVEL: z.enum(["debug", "info", "warn", "error"]).default("info"),
 

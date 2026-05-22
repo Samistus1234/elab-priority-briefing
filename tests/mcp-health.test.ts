@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { aggregateRows, type McpCallRow } from "../src/mcp-health.js";
+import { aggregateRows, buildMcpDigest, type McpCallRow } from "../src/mcp-health.js";
 
 function row(over: Partial<McpCallRow> = {}): McpCallRow {
   return {
@@ -67,5 +67,34 @@ describe("aggregateRows", () => {
     );
     const x = s.perTool.find((t) => t.tool === "x")!;
     expect(x.sampleErrors).toEqual(["e1", "e2", "e3"]);
+  });
+});
+
+describe("buildMcpDigest", () => {
+  it("reports idle when there are no calls", () => {
+    const text = buildMcpDigest(aggregateRows([], 24));
+    expect(text).toContain("no tool calls");
+    expect(text).toContain("24h");
+  });
+
+  it("reports healthy when there are calls but no failures", () => {
+    const rows = [row({ tool: "a" }), row({ tool: "b" })];
+    const text = buildMcpDigest(aggregateRows(rows, 24));
+    expect(text).toContain("✅");
+    expect(text).toContain("0 failures");
+    expect(text).toContain("2 calls");
+  });
+
+  it("lists failing tools and appends diagnosis when present", () => {
+    const rows = [
+      row({ tool: "search_invoices", ok: false, error: "embed parser crash" }),
+      row({ tool: "search_invoices", ok: true }),
+    ];
+    const text = buildMcpDigest(aggregateRows(rows, 24), "- search_invoices: rewrite query");
+    expect(text).toContain("⚠️");
+    expect(text).toContain("`search_invoices`");
+    expect(text).toContain("embed parser crash");
+    expect(text).toContain("Diagnosis");
+    expect(text).toContain("rewrite query");
   });
 });

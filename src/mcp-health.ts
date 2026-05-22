@@ -56,3 +56,33 @@ export function aggregateRows(rows: McpCallRow[], lookbackHours: number): McpSta
     lookbackHours,
   };
 }
+
+export function buildMcpDigest(stats: McpStats, diagnosis?: string): string {
+  const h = stats.lookbackHours;
+
+  if (stats.totalCalls === 0) {
+    return `🔭 *MCP Health* — no tool calls logged in the last ${h}h (server idle or telemetry off).`;
+  }
+
+  if (stats.totalFailures === 0) {
+    return `✅ *MCP Health* — ${stats.toolsUsed} tools, ${stats.totalCalls} calls, 0 failures (last ${h}h).`;
+  }
+
+  const lines: string[] = [];
+  lines.push(
+    `⚠️ *MCP Health* — ${stats.totalFailures} failure(s) across ${stats.failing.length} tool(s) in the last ${h}h.`,
+  );
+  lines.push(`Total: ${stats.totalCalls} calls / ${stats.toolsUsed} tools.`);
+  lines.push("");
+  for (const t of stats.failing) {
+    const pct = Math.round(t.failureRate * 100);
+    lines.push(`🔴 \`${t.tool}\` — ${t.failures}/${t.calls} failed (${pct}%)`);
+    if (t.sampleErrors[0]) lines.push(`   ↳ ${t.sampleErrors[0].slice(0, 160)}`);
+  }
+  if (diagnosis && diagnosis.trim()) {
+    lines.push("");
+    lines.push("*Diagnosis*");
+    lines.push(diagnosis.trim());
+  }
+  return lines.join("\n");
+}

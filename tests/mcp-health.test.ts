@@ -98,6 +98,16 @@ describe("buildMcpDigest", () => {
     expect(text).toContain("rewrite query");
   });
 
+  it("wraps free-form diagnosis in a code fence and neutralizes backticks", () => {
+    const rows = [row({ tool: "z", ok: false, error: "boom" })];
+    const text = buildMcpDigest(aggregateRows(rows, 24), "- *unbalanced and `code`");
+    // diagnosis content is preserved...
+    expect(text).toContain("- *unbalanced and 'code'"); // backticks neutralized
+    expect(text).not.toContain("`code`");
+    // ...inside a fenced block so stray markdown can't break Telegram parsing
+    expect(text).toContain("```");
+  });
+
   it("omits the Diagnosis section when diagnosis is blank/whitespace", () => {
     const rows = [row({ tool: "x", ok: false, error: "boom" })];
     const text = buildMcpDigest(aggregateRows(rows, 24), "   ");

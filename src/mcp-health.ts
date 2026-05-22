@@ -94,7 +94,14 @@ export function buildMcpDigest(stats: McpStats, diagnosis?: string): string {
   if (diagnosis && diagnosis.trim()) {
     lines.push("");
     lines.push("*Diagnosis*");
-    lines.push(diagnosis.trim());
+    // The diagnosis is free-form LLM output. Telegram legacy Markdown has no
+    // escape mechanism, so an unbalanced * / _ / [ would make it reject the
+    // whole digest. Render it in a fenced code block (content is literal there)
+    // after neutralizing any backtick fences so they can't close the block.
+    const safeDiag = diagnosis.trim().replace(/```/g, "'''").replace(/`/g, "'");
+    lines.push("```");
+    lines.push(safeDiag);
+    lines.push("```");
   }
   return lines.join("\n");
 }

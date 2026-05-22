@@ -1,3 +1,8 @@
+import Anthropic from "@anthropic-ai/sdk";
+import { loadConfig } from "./config.js";
+import { logger } from "./logger.js";
+import { getSupabase } from "./supabase.js";
+
 export interface McpCallRow {
   tool: string;
   ok: boolean;
@@ -85,4 +90,80 @@ export function buildMcpDigest(stats: McpStats, diagnosis?: string): string {
     lines.push(diagnosis.trim());
   }
   return lines.join("\n");
+}
+
+/** Fetch the last `lookbackHours` of tool calls for this org and aggregate. */
+export async function gatherMcpStats(lookbackHours: number): Promise<McpStats> {
+  const supabase = getSupabase();
+  const cfg = loadConfig();
+  const since = new Date(Date.now() - lookbackHours * 3_600_000).toISOString();
+
+  const { data, error } = await supabase
+    .from("mcp_tool_calls")
+    .select("tool, ok, error, duration_ms, arg_keys, created_at")
+    .eq("org_id", cfg.supabase.orgId)
+    .gte("created_at", since)
+    .order("created_at", { ascending: false })
+    .limit(5000);
+
+  if (error) {
+    logger.error({ err: error.message }, "gatherMcpStats query failed");
+    return aggregateRows([], lookbackHours);
+  }
+  return aggregateRows((data ?? []) as McpCallRow[], lookbackHours);
+}
+
+/** Delete telemetry rows older than `retentionDays`. Never throws. */
+export async function pruneOldMcpCalls(retentionDays = 90): Promise<void> {
+  const supabase = getSupabase();
+  const cfg = loadConfig();
+  const cutoff = new Date(Date.now() - retentionDays * 86_400_000).toISOString();
+
+  const { error } = await supabase
+    .from("mcp_tool_calls")
+    .delete()
+    .eq("org_id", cfg.supabase.orgId)
+    .lt("created_at", cutoff);
+
+  if (error) logger.error({ err: error.message }, "pruneOldMcpCalls failed");
+}
+
+/** One Anthropic completion diagnosing the failing tools. Empty string if no key. */
+export async function diagnoseFailures(failing: ToolStat[]): Promise<string> {
+  const cfg = loadConfig();
+  if (!cfg.llm.apiKey || failing.length === 0) return "";
+
+  const client = new Anthropic({ apiKey: cfg.llm.apiKey });
+  const failureBlock = failing
+    .map(
+      (t) =>
+        `- ${t.tool}: ${t.failures}/${t.calls} failed. Sample errors: ${
+          t.sampleErrors.join(" | ") || "(none captured)"
+        }`,
+    )
+    .join("\n");
+
+  const system = [
+    "You diagnose failures in the ELAB MCP tool server (elab-ops-monitor).",
+    "These are TypeScript tool functions in a single index.ts that query Supabase via PostgREST (supabase-js).",
+    "For each failing tool give: (1) probable root cause, (2) one concrete fix — at most 2 sentences each.",
+    "Be specific and terse. One markdown bullet per tool. No preamble.",
+  ].join("\n");
+
+  try {
+    const resp = await client.messages.create({
+      model: cfg.llm.model,
+      max_tokens: 800,
+      system,
+      messages: [{ role: "user", content: `Failing MCP tools:\n${failureBlock}` }],
+    });
+    return resp.content
+      .filter((b): b is Anthropic.TextBlock => b.type === "text")
+      .map((b) => b.text)
+      .join("\n")
+      .trim();
+  } catch (e) {
+    logger.error({ err: (e as Error).message }, "diagnoseFailures failed");
+    return "_(diagnosis unavailable — Anthropic call failed)_";
+  }
 }

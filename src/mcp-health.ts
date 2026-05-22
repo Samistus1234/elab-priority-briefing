@@ -82,7 +82,14 @@ export function buildMcpDigest(stats: McpStats, diagnosis?: string): string {
   for (const t of stats.failing) {
     const pct = Math.round(t.failureRate * 100);
     lines.push(`🔴 \`${t.tool}\` — ${t.failures}/${t.calls} failed (${pct}%)`);
-    if (t.sampleErrors[0]) lines.push(`   ↳ ${t.sampleErrors[0].slice(0, 160)}`);
+    if (t.sampleErrors[0]) {
+      // Render DB/PostgREST error text inside a code span. Telegram legacy
+      // Markdown can't be escaped, so a raw `*`/`_`/`[` in an error would make
+      // it reject the whole message. Inside backticks only a backtick breaks
+      // the span, so strip those first. Keeps the digest deliverable.
+      const safeErr = t.sampleErrors[0].replace(/`/g, "'").slice(0, 160);
+      lines.push(`   ↳ \`${safeErr}\``);
+    }
   }
   if (diagnosis && diagnosis.trim()) {
     lines.push("");
@@ -92,7 +99,14 @@ export function buildMcpDigest(stats: McpStats, diagnosis?: string): string {
   return lines.join("\n");
 }
 
-/** Fetch the last `lookbackHours` of tool calls for this org and aggregate. */
+const MCP_QUERY_LIMIT = 5000;
+
+/**
+ * Fetch the last `lookbackHours` of tool calls for this org and aggregate.
+ * Returns empty stats on query error (does not throw). Assumes config was
+ * validated at process start — `loadConfig()`/`getSupabase()` would only throw
+ * on a misconfigured environment, which crashes the scheduler at boot.
+ */
 export async function gatherMcpStats(lookbackHours: number): Promise<McpStats> {
   const supabase = getSupabase();
   const cfg = loadConfig();
@@ -104,13 +118,20 @@ export async function gatherMcpStats(lookbackHours: number): Promise<McpStats> {
     .eq("org_id", cfg.supabase.orgId)
     .gte("created_at", since)
     .order("created_at", { ascending: false })
-    .limit(5000);
+    .limit(MCP_QUERY_LIMIT);
 
   if (error) {
     logger.error({ err: error.message }, "gatherMcpStats query failed");
     return aggregateRows([], lookbackHours);
   }
-  return aggregateRows((data ?? []) as McpCallRow[], lookbackHours);
+  const rows = (data ?? []) as McpCallRow[];
+  if (rows.length >= MCP_QUERY_LIMIT) {
+    logger.warn(
+      { limit: MCP_QUERY_LIMIT, lookbackHours },
+      "gatherMcpStats hit row limit — digest may undercount calls/failures",
+    );
+  }
+  return aggregateRows(rows, lookbackHours);
 }
 
 /** Delete telemetry rows older than `retentionDays`. Never throws. */
@@ -128,7 +149,7 @@ export async function pruneOldMcpCalls(retentionDays = 90): Promise<void> {
   if (error) logger.error({ err: error.message }, "pruneOldMcpCalls failed");
 }
 
-/** One Anthropic completion diagnosing the failing tools. Empty string if no key. */
+/** One Anthropic completion diagnosing the failing tools. Empty string if no API key or no failures. Never throws. */
 export async function diagnoseFailures(failing: ToolStat[]): Promise<string> {
   const cfg = loadConfig();
   if (!cfg.llm.apiKey || failing.length === 0) return "";

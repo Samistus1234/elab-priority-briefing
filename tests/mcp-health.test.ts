@@ -97,4 +97,22 @@ describe("buildMcpDigest", () => {
     expect(text).toContain("Diagnosis");
     expect(text).toContain("rewrite query");
   });
+
+  it("omits the Diagnosis section when diagnosis is blank/whitespace", () => {
+    const rows = [row({ tool: "x", ok: false, error: "boom" })];
+    const text = buildMcpDigest(aggregateRows(rows, 24), "   ");
+    expect(text).not.toContain("Diagnosis");
+  });
+
+  it("renders sample errors Telegram-Markdown-safe and rounds failure rate", () => {
+    const rows = [
+      row({ tool: "y", ok: false, error: 'relation "x" does not *exist* `weird`' }),
+      row({ tool: "y", ok: true }),
+      row({ tool: "y", ok: true }),
+    ];
+    const text = buildMcpDigest(aggregateRows(rows, 24));
+    expect(text).toContain("(33%)"); // 1/3 rounded
+    expect(text).not.toContain("`weird`"); // backticks stripped from error content
+    expect(text).toContain("does not *exist*"); // literal, but now inside a code span
+  });
 });

@@ -1,7 +1,7 @@
 import cron from "node-cron";
 import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
-import { runCeoHealthCheck, runEscalationSweep, runMorningBrief } from "./jobs.js";
+import { runCeoHealthCheck, runEscalationSweep, runMcpHealthDigest, runMorningBrief } from "./jobs.js";
 import { getSupabase } from "./supabase.js";
 
 /**
@@ -42,11 +42,22 @@ export function startSchedulers(): void {
     { timezone: cfg.tz },
   );
 
+  cron.schedule(
+    cfg.cron.mcpHealthDigest,
+    () => {
+      runMcpHealthDigest().catch((e) =>
+        logger.error({ err: (e as Error).message }, "mcp_health_digest crashed"),
+      );
+    },
+    { timezone: cfg.tz },
+  );
+
   logger.info(
     {
       morning: cfg.cron.morningBrief,
       escalation: cfg.cron.escalationSweep,
       health: cfg.cron.ceoHealthCheck,
+      mcpHealthDigest: cfg.cron.mcpHealthDigest,
       tz: cfg.tz,
     },
     "Schedulers started",

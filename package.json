@@ -11,6 +11,7 @@
     "dev": "tsx src/index.ts",
     "brief:now": "tsx src/cli/brief-now.ts",
     "escalation:now": "tsx src/cli/escalation-now.ts",
+    "mcp:digest:now": "tsx src/cli/mcp-digest-now.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

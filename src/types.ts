@@ -67,7 +67,8 @@ export type JobType =
   | "morning_brief"
   | "escalation_sweep"
   | "ceo_rollup"
-  | "health_check";
+  | "health_check"
+  | "mcp_health_digest";
 
 export type SendStatus =
   | "sent"

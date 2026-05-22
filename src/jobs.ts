@@ -15,6 +15,7 @@ import {
   groupByAssignee,
 } from "./priority-engine.js";
 import { Dispatcher } from "./dispatcher.js";
+import { buildMcpDigest, diagnoseFailures, gatherMcpStats, pruneOldMcpCalls } from "./mcp-health.js";
 import type { CaseLite, StaffUser, SendStatus } from "./types.js";
 
 /**
@@ -306,6 +307,50 @@ export async function runCeoHealthCheck(): Promise<void> {
     status: statusFor(result.ok, cfg.dryRun),
     error: result.error,
   });
+}
+
+export async function runMcpHealthDigest(): Promise<void> {
+  const cfg = loadConfig();
+  const dispatcher = new Dispatcher();
+
+  // Daily idempotency (CEO-level, null recipient). Only blocks after a real send.
+  if (await dispatcher.alreadySentToday("mcp_health_digest", null)) {
+    logger.info("mcp_health_digest: already sent today, skipping");
+    return;
+  }
+
+  logger.info({ dryRun: cfg.dryRun }, "mcp_health_digest: start");
+
+  const stats = await gatherMcpStats(cfg.mcp.digestLookbackHours);
+  const diagnosis = stats.failing.length > 0 ? await diagnoseFailures(stats.failing) : "";
+  const text = buildMcpDigest(stats, diagnosis);
+
+  const result = await dispatcher.sendTelegram({
+    chat_id: cfg.telegram.ceoChatId,
+    text,
+    parse_mode: "Markdown",
+  });
+
+  await dispatcher.log({
+    jobType: "mcp_health_digest",
+    recipientUserId: null,
+    channel: "telegram",
+    caseCount: stats.totalFailures,
+    payloadSummary: {
+      total_calls: stats.totalCalls,
+      total_failures: stats.totalFailures,
+      tools_used: stats.toolsUsed,
+      failing_tools: stats.failing.map((t) => t.tool),
+    },
+    status: statusFor(result.ok, cfg.dryRun),
+    error: result.error,
+  });
+
+  await pruneOldMcpCalls().catch((e) =>
+    logger.error({ err: (e as Error).message }, "mcp_health_digest: prune failed"),
+  );
+
+  logger.info({ failures: stats.totalFailures }, "mcp_health_digest: done");
 }
 
 // ---- helpers ----

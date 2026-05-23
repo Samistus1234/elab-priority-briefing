@@ -16,9 +16,12 @@ export async function fetchWhatsappGroups(windowStart: string, cursor: string, l
   if (error) { console.error("brain_whatsapp_groups failed:", error.message); return []; }
   const out: Group[] = [];
   for (const g of groups ?? []) {
-    const { data: msgs } = await sb.from("whatsapp_messages")
+    const { data: msgs, error: msgErr } = await sb.from("whatsapp_messages")
       .select("message_body, direction, created_at")
       .eq("conversation_id", g.group_id).order("created_at", { ascending: true }).limit(500);
+    // Skip (don't advance the cursor over) a group whose rows we couldn't read,
+    // so it's retried next run rather than synthesized from an empty transcript.
+    if (msgErr) { console.error(`whatsapp_messages fetch failed for ${g.group_id}:`, msgErr.message); continue; }
     const lines: TranscriptLine[] = (msgs ?? []).map((m: any) => ({
       who: m.direction === "inbound" ? "client" : "us", text: m.message_body ?? "",
     }));
@@ -35,8 +38,9 @@ export async function fetchCaseGroups(windowStart: string, cursor: string, limit
   if (error) { console.error("brain_case_groups failed:", error.message); return []; }
   const out: Group[] = [];
   for (const g of groups ?? []) {
-    const { data: notes } = await sb.from("case_notes")
+    const { data: notes, error: notesErr } = await sb.from("case_notes")
       .select("content, created_at").eq("case_id", g.group_id).order("created_at", { ascending: true }).limit(500);
+    if (notesErr) { console.error(`case_notes fetch failed for ${g.group_id}:`, notesErr.message); continue; }
     const lines: TranscriptLine[] = (notes ?? []).map((n: any) => ({ who: "us" as const, text: n.content ?? "" }));
     out.push({ source: "case", groupId: g.group_id, cursorTs: g.last_activity, transcript: buildTranscript(lines) });
   }
@@ -52,8 +56,9 @@ export async function fetchTicketGroups(windowStart: string, cursor: string, lim
   if (error) { console.error("ticket fetch failed:", error.message); return []; }
   const out: Group[] = [];
   for (const t of tickets ?? []) {
-    const { data: comments } = await sb.from("helpdesk_ticket_comments")
+    const { data: comments, error: commentsErr } = await sb.from("helpdesk_ticket_comments")
       .select("content, created_at").eq("ticket_id", t.id).order("created_at", { ascending: true }).limit(200);
+    if (commentsErr) { console.error(`ticket comments fetch failed for ${t.id}:`, commentsErr.message); continue; }
     const lines: TranscriptLine[] = [
       { who: "client", text: `${t.subject ?? ""}. ${t.description ?? ""}` },
       ...(comments ?? []).map((c: any) => ({ who: "us" as const, text: c.content ?? "" })),

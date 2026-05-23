@@ -12,7 +12,7 @@ export async function extractFromTranscript(transcript: string): Promise<Knowled
   const client = new Anthropic({ apiKey: cfg.llm.apiKey });
   const resp = await client.messages.create({
     model: cfg.llm.model,
-    max_tokens: 1500,
+    max_tokens: 3000,
     messages: [{ role: "user", content: buildThreadExtractionPrompt(transcript) }],
   });
   const text = resp.content

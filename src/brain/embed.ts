@@ -14,5 +14,9 @@ function getExtractor(): Promise<FeatureExtractionPipeline> {
 export async function embed(text: string): Promise<number[]> {
   const extractor = await getExtractor();
   const output = await extractor(text, { pooling: "mean", normalize: true });
-  return Array.from(output.data as Float32Array);
+  const vec = Array.from(output.data as Float32Array);
+  // brain_entries.embedding is vector(384); a model-swap mismatch must fail loudly,
+  // not silently store wrong-dimension vectors.
+  if (vec.length !== 384) throw new Error(`unexpected embedding dim ${vec.length} (want 384)`);
+  return vec;
 }

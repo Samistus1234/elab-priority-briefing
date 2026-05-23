@@ -28,6 +28,9 @@ const ConfigSchema = z.object({
   CEO_HEALTH_CHECK_CRON: z.string().default("30 8 * * *"),
   MCP_HEALTH_DIGEST_CRON: z.string().default("0 9 * * *"),
   MCP_DIGEST_LOOKBACK_HOURS: z.coerce.number().int().positive().default(24),
+  BRAIN_SYNTH_CRON: z.string().default("0 */2 * * *"),
+  BRAIN_MAX_GROUPS_PER_RUN: z.coerce.number().int().positive().default(60),
+  BRAIN_WINDOW_DAYS: z.coerce.number().int().positive().default(180),
 
   COMMAND_CENTRE_URL: z.string().url().default("https://app.elabsolution.org"),
 
@@ -66,6 +69,7 @@ export type AppConfig = {
   };
   commandCentreUrl: string;
   mcp: { digestLookbackHours: number };
+  brain: { synthCron: string; maxGroupsPerRun: number; windowDays: number };
   maxMessagesPerRun: number;
   neglectThresholdHours: number;
   logLevel: "debug" | "info" | "warn" | "error";
@@ -115,6 +119,11 @@ export function loadConfig(): AppConfig {
     },
     commandCentreUrl: e.COMMAND_CENTRE_URL,
     mcp: { digestLookbackHours: e.MCP_DIGEST_LOOKBACK_HOURS },
+    brain: {
+      synthCron: e.BRAIN_SYNTH_CRON,
+      maxGroupsPerRun: e.BRAIN_MAX_GROUPS_PER_RUN,
+      windowDays: e.BRAIN_WINDOW_DAYS,
+    },
     maxMessagesPerRun: e.MAX_MESSAGES_PER_RUN,
     neglectThresholdHours: e.NEGLECT_THRESHOLD_HOURS,
     logLevel: e.LOG_LEVEL,

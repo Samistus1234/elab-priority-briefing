@@ -14,4 +14,14 @@ describe("buildTranscript", () => {
     const t = buildTranscript([{ who: "us", text: long }, { who: "us", text: "" }], 50);
     expect(t.length).toBeLessThanOrEqual(50);
   });
+  it("truncates at a line boundary, not mid-line", () => {
+    const t = buildTranscript(
+      [{ who: "us", text: "first" }, { who: "us", text: "second line is long" }],
+      12,
+    );
+    expect(t).toBe("Us: first"); // drops the partial second line
+  });
+  it("returns an empty string when no usable lines", () => {
+    expect(buildTranscript([{ who: "us", text: "  " }])).toBe("");
+  });
 });

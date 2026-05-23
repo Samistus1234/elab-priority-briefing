@@ -11,5 +11,8 @@ export function buildTranscript(lines: TranscriptLine[], budget = DEFAULT_BUDGET
     .filter((l) => l.text && l.text.trim() !== "")
     .map((l) => `${l.who === "client" ? "Client" : "Us"}: ${l.text.trim()}`)
     .join("\n");
-  return out.length > budget ? out.slice(0, budget) : out;
+  if (out.length <= budget) return out;
+  // Truncate at the last complete line within budget — avoid half-turns / split chars.
+  const cut = out.lastIndexOf("\n", budget - 1);
+  return cut > 0 ? out.slice(0, cut) : out.slice(0, budget);
 }

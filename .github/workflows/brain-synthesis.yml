@@ -1,0 +1,56 @@
+name: brain-synthesis
+
+# ELAB Brain nightly synthesis. Groups CRM rows (conversations/cases/tickets),
+# extracts generalized PII-stripped Q&A via Anthropic, embeds with gte-small, and
+# upserts into brain_entries. Runs here (not the VPS) because the VPS web terminal
+# mangled secret pastes; GitHub stores secrets encrypted and the runner has the
+# internet access the job needs (Anthropic, Supabase, HF model download).
+
+on:
+  schedule:
+    - cron: "0 1 * * *"   # 01:00 UTC = 02:00 Africa/Lagos, nightly
+  workflow_dispatch: {}    # manual "Run workflow" button for testing
+
+# Don't let a long run overlap the next nightly trigger.
+concurrency:
+  group: brain-synthesis
+  cancel-in-progress: false
+
+jobs:
+  synth:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: "npm"
+
+      - run: npm ci
+
+      - run: npm run build
+
+      - name: Run brain synthesis
+        env:
+          SUPABASE_URL: https://fwmhfwprvqaovidykaqt.supabase.co
+          SUPABASE_ORG_ID: "00000000-0000-0000-0000-000000000001"
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: claude-sonnet-4-6
+          BRAIN_MAX_GROUPS_PER_RUN: "60"
+          BRAIN_WINDOW_DAYS: "180"
+          # Inert placeholders — required by config validation, unused by the brain path.
+          META_GRAPH_TOKEN: unused_brain_only_0000000000
+          META_PHONE_NUMBER_ID: unused
+          TELEGRAM_BOT_TOKEN: unused_brain_only_0000000000
+          TELEGRAM_CEO_CHAT_ID: "0"
+        run: |
+          # transformers.js/onnxruntime aborts during native teardown on process
+          # exit (mutex-lock), AFTER the work + completion log. Swallow that exit
+          # code, then assert the completion line actually printed so REAL failures
+          # (where synthesis never completes) still fail the job.
+          set -o pipefail
+          node build/cli/brain-synth-now.js 2>&1 | tee run.log || true
+          grep -q '"msg":"brain:synth:now completed"' run.log

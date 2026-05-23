@@ -1,6 +1,8 @@
 -- v1.1 synthesis: return group ids + last-activity for incremental, windowed,
 -- cursor-based grouping. WhatsApp groups by conversation_id; cases by case_id.
 -- (Tickets are queried directly off helpdesk_tickets.updated_at in the worker.)
+begin;
+
 create or replace function public.brain_whatsapp_groups(
   p_window_start timestamptz, p_cursor timestamptz, p_limit int
 ) returns table (group_id uuid, last_activity timestamptz)
@@ -26,3 +28,11 @@ language sql stable as $$
   order by max(created_at) asc
   limit p_limit;
 $$;
+
+-- Keep the grouping scans fast as message/note volume grows.
+create index if not exists idx_whatsapp_messages_convo_created
+  on public.whatsapp_messages (conversation_id, created_at);
+create index if not exists idx_case_notes_case_created
+  on public.case_notes (case_id, created_at);
+
+commit;

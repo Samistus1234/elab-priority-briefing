@@ -42,7 +42,7 @@ export async function runBrainSynthesis(): Promise<{ created: number; reinforced
     for (const g of groups) {
       processedGroups++;
       try {
-        if (!g.transcript || g.transcript.trim().length < 30) { maxCursor = max(maxCursor, g.cursorTs); continue; }
+        if (!g.transcript || g.transcript.trim().length < 30) { maxCursor = maxTs(maxCursor, g.cursorTs); continue; }
         const units = await extractFromTranscript(g.transcript);
         for (const u of units) {
           const status = statusForConfidence(u.confidence);
@@ -53,19 +53,24 @@ export async function runBrainSynthesis(): Promise<{ created: number; reinforced
             p_org_id: orgId, query_embedding: embedding, match_count: 1,
             min_similarity: DEDUP_THRESHOLD, p_include_pending: true,
           });
+          const nowIso = new Date().toISOString();
           if (matches && matches.length > 0) {
-            await sb.from("brain_entries").update({ last_seen_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", matches[0].id);
-            await sb.rpc("increment_brain_seen", { p_id: matches[0].id }).then(() => {}, () => {});
+            const { error: updErr } = await sb.from("brain_entries")
+              .update({ last_seen_at: nowIso, updated_at: nowIso }).eq("id", matches[0].id);
+            if (updErr) throw new Error(`brain_entries update failed: ${updErr.message}`);
+            await sb.rpc("increment_brain_seen", { p_id: matches[0].id })
+              .then(() => {}, (e: any) => logger.warn({ err: e?.message ?? e }, "brain: increment_seen failed"));
             reinforced++;
           } else {
-            await sb.from("brain_entries").insert({
+            const { error: insErr } = await sb.from("brain_entries").insert({
               org_id: orgId, topic, question, answer, tags: u.tags,
               source_refs: [{ source, id: g.groupId }], confidence: u.confidence, status, embedding,
             });
+            if (insErr) throw new Error(`brain_entries insert failed: ${insErr.message}`);
             created++;
           }
         }
-        maxCursor = max(maxCursor, g.cursorTs);
+        maxCursor = maxTs(maxCursor, g.cursorTs);
       } catch (e) {
         logger.error({ err: (e as Error).message, source, groupId: g.groupId }, "brain: group failed");
         // do NOT advance past a failed group
@@ -84,4 +89,10 @@ export async function runBrainSynthesis(): Promise<{ created: number; reinforced
   return { created, reinforced, discarded, processedGroups };
 }
 
-function max(a: string, b: string): string { return a >= b ? a : b; }
+// Return the later of two timestamps. Uses numeric time when both parse (robust to
+// format differences, e.g. "…+00" vs "Z"); falls back to string compare otherwise.
+function maxTs(a: string, b: string): string {
+  const da = Date.parse(a), db = Date.parse(b);
+  if (Number.isNaN(da) || Number.isNaN(db)) return a >= b ? a : b;
+  return da >= db ? a : b;
+}

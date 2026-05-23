@@ -7,8 +7,8 @@ export interface KnowledgeUnit {
 }
 
 export interface SourceRef {
-  source: string; // 'whatsapp' | 'ticket' | 'case_note'
-  id: string;     // source row id
+  source: string; // v1.1 group sources: 'whatsapp_convo' | 'case' | 'ticket'
+  id: string;     // the group id (conversation_id | case_id | ticket id)
 }
 
 export type EntryStatus = "published" | "pending" | "archived";

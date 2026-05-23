@@ -5,7 +5,12 @@ let extractorPromise: Promise<FeatureExtractionPipeline> | null = null;
 function getExtractor(): Promise<FeatureExtractionPipeline> {
   if (!extractorPromise) {
     // Same model Supabase.ai uses in the edge query → vectors share one space.
-    extractorPromise = pipeline("feature-extraction", "Supabase/gte-small");
+    // Reset on failure so a transient model-load error doesn't permanently break
+    // a long-running worker (a cached rejected promise would re-reject forever).
+    extractorPromise = pipeline("feature-extraction", "Supabase/gte-small").catch((e) => {
+      extractorPromise = null;
+      throw e;
+    });
   }
   return extractorPromise;
 }

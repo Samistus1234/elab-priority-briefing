@@ -35,6 +35,9 @@ const ConfigSchema = z.object({
   BRAIN_MAX_CHUNKS_PER_IMPORT: z.coerce.number().int().positive().default(40),
   BRAIN_IMPORT_CHUNK_BUDGET: z.coerce.number().int().positive().default(12000),
   BRAIN_MAX_IMPORTS_PER_RUN: z.coerce.number().int().positive().default(10),
+  BRAIN_CONFLICT_DETECTION: z.enum(["true", "false"]).default("true"),
+  BRAIN_CONFLICT_SIMILARITY: z.coerce.number().default(0.80),
+  BRAIN_MAX_CONFLICT_CHECKS_PER_RUN: z.coerce.number().int().positive().default(50),
 
   COMMAND_CENTRE_URL: z.string().url().default("https://app.elabsolution.org"),
 
@@ -73,7 +76,7 @@ export type AppConfig = {
   };
   commandCentreUrl: string;
   mcp: { digestLookbackHours: number };
-  brain: { synthCron: string; maxGroupsPerRun: number; windowDays: number; importBucket: string; maxChunksPerImport: number; importChunkBudget: number; maxImportsPerRun: number };
+  brain: { synthCron: string; maxGroupsPerRun: number; windowDays: number; importBucket: string; maxChunksPerImport: number; importChunkBudget: number; maxImportsPerRun: number; conflictDetection: boolean; conflictSimilarity: number; maxConflictChecksPerRun: number };
   maxMessagesPerRun: number;
   neglectThresholdHours: number;
   logLevel: "debug" | "info" | "warn" | "error";
@@ -131,6 +134,9 @@ export function loadConfig(): AppConfig {
       maxChunksPerImport: e.BRAIN_MAX_CHUNKS_PER_IMPORT,
       importChunkBudget: e.BRAIN_IMPORT_CHUNK_BUDGET,
       maxImportsPerRun: e.BRAIN_MAX_IMPORTS_PER_RUN,
+      conflictDetection: e.BRAIN_CONFLICT_DETECTION === "true",
+      conflictSimilarity: e.BRAIN_CONFLICT_SIMILARITY,
+      maxConflictChecksPerRun: e.BRAIN_MAX_CONFLICT_CHECKS_PER_RUN,
     },
     maxMessagesPerRun: e.MAX_MESSAGES_PER_RUN,
     neglectThresholdHours: e.NEGLECT_THRESHOLD_HOURS,

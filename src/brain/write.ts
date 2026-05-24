@@ -50,10 +50,11 @@ export async function writeUnit(
   let conflictsWith: string | null = null;
   let conflictReason: string | null = null;
   if (opts.conflictOpts) {
-    const { data: pub } = await sb.rpc("match_brain_entries", {
+    const { data: pub, error: pubErr } = await sb.rpc("match_brain_entries", {
       p_org_id: orgId, query_embedding: embedding, match_count: 1,
       min_similarity: opts.conflictOpts.similarity, p_include_pending: false,
     });
+    if (pubErr) logger.warn({ err: pubErr.message }, "brain: conflict retrieval failed, skipping");
     const cand = pub?.[0];
     if (cand && cand.similarity < DEDUP_THRESHOLD) {
       const verdict = await judgeConflict(

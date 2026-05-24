@@ -34,4 +34,10 @@ describe("parseWhatsappExport", () => {
     expect(parseWhatsappExport("")).toEqual([]);
     expect(parseWhatsappExport("no timestamps here at all")).toEqual([]);
   });
+
+  it("keeps real messages that contain the word 'null'", () => {
+    const txt = `[2024-05-01, 10:01:00] Sam: the DataFlow result came back null`;
+    const out = parseWhatsappExport(txt);
+    expect(out).toEqual([{ ts: "2024-05-01, 10:01:00", sender: "Sam", text: "the DataFlow result came back null" }]);
+  });
 });

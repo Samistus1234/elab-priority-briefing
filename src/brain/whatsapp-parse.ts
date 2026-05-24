@@ -14,7 +14,6 @@ const SYSTEM_PATTERNS = [
   /<Media omitted>|image omitted|video omitted|audio omitted|sticker omitted|GIF omitted|document omitted|Contact card omitted/i,
   /<This message was edited>/i,
   /This message was deleted|You deleted this message/i,
-  /\bnull\b/,
 ];
 
 function stripMarks(s: string): string {

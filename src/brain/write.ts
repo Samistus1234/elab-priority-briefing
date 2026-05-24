@@ -13,6 +13,7 @@ export type WriteResult = "created" | "reinforced" | "discarded";
  * Scrub → embed → dedup → insert-or-reinforce one knowledge unit.
  * `forcePending` caps a would-be `published` at `pending` (imports never auto-publish),
  * but a `discard`-level unit is still dropped.
+ * If `increment_brain_seen` fails the result is still "reinforced" — the seen-count is advisory.
  */
 export async function writeUnit(
   sb: SupabaseClient,

@@ -3,11 +3,7 @@ import { logger } from "../logger.js";
 import { getSupabase } from "../supabase.js";
 import { fetchWhatsappGroups, fetchCaseGroups, fetchTicketGroups, type Group } from "./sources.js";
 import { extractFromTranscript } from "./extract.js";
-import { embed } from "./embed.js";
-import { statusForConfidence } from "./gating.js";
-import { scrubPii } from "./pii.js";
-
-const DEDUP_THRESHOLD = 0.92;
+import { writeUnit } from "./write.js";
 
 type Reader = (windowStart: string, cursor: string, limit: number) => Promise<Group[]>;
 const SOURCES: { source: string; read: Reader }[] = [
@@ -45,30 +41,10 @@ export async function runBrainSynthesis(): Promise<{ created: number; reinforced
         if (!g.transcript || g.transcript.trim().length < 30) { maxCursor = maxTs(maxCursor, g.cursorTs); continue; }
         const units = await extractFromTranscript(g.transcript);
         for (const u of units) {
-          const status = statusForConfidence(u.confidence);
-          if (status === "discard") { discarded++; continue; }
-          const topic = scrubPii(u.topic), question = scrubPii(u.question), answer = scrubPii(u.answer);
-          const embedding = await embed(`${topic} ${question} ${answer}`);
-          const { data: matches } = await sb.rpc("match_brain_entries", {
-            p_org_id: orgId, query_embedding: embedding, match_count: 1,
-            min_similarity: DEDUP_THRESHOLD, p_include_pending: true,
-          });
-          const nowIso = new Date().toISOString();
-          if (matches && matches.length > 0) {
-            const { error: updErr } = await sb.from("brain_entries")
-              .update({ last_seen_at: nowIso, updated_at: nowIso }).eq("id", matches[0].id);
-            if (updErr) throw new Error(`brain_entries update failed: ${updErr.message}`);
-            await sb.rpc("increment_brain_seen", { p_id: matches[0].id })
-              .then(() => {}, (e: any) => logger.warn({ err: e?.message ?? e }, "brain: increment_seen failed"));
-            reinforced++;
-          } else {
-            const { error: insErr } = await sb.from("brain_entries").insert({
-              org_id: orgId, topic, question, answer, tags: u.tags,
-              source_refs: [{ source, id: g.groupId }], confidence: u.confidence, status, embedding,
-            });
-            if (insErr) throw new Error(`brain_entries insert failed: ${insErr.message}`);
-            created++;
-          }
+          const result = await writeUnit(sb, { orgId, unit: u, source, sourceId: g.groupId });
+          if (result === "created") created++;
+          else if (result === "reinforced") reinforced++;
+          else discarded++;
         }
         maxCursor = maxTs(maxCursor, g.cursorTs);
       } catch (e) {

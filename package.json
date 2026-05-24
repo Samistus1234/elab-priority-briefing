@@ -13,6 +13,7 @@
     "escalation:now": "tsx src/cli/escalation-now.ts",
     "mcp:digest:now": "tsx src/cli/mcp-digest-now.ts",
     "brain:synth:now": "tsx src/cli/brain-synth-now.ts",
+    "brain:import:now": "tsx src/cli/brain-import-now.ts",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit"

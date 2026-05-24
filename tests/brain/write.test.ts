@@ -5,8 +5,29 @@ vi.mock("../../src/brain/embed.js", () => ({
   embed: vi.fn(async () => new Array(384).fill(0.1)),
 }));
 
+vi.mock("../../src/brain/conflict.js", () => ({
+  judgeConflict: vi.fn(),
+  setConflictBudget: vi.fn(),
+}));
+import { judgeConflict } from "../../src/brain/conflict.js";
+
 import { writeUnit } from "../../src/brain/write.js";
 import type { KnowledgeUnit } from "../../src/brain/types.js";
+
+function fakeSbConflict(dedup: Array<{ id: string }>, published: Array<any>) {
+  const inserted: any[] = [];
+  const sb = {
+    rpc: vi.fn(async (name: string, args: any) => {
+      if (name !== "match_brain_entries") return { data: null, error: null };
+      return { data: args.p_include_pending ? dedup : published, error: null };
+    }),
+    from: vi.fn(() => ({
+      update: () => ({ eq: async () => ({ error: null }) }),
+      insert: async (row: any) => { inserted.push(row); return { error: null }; },
+    })),
+  };
+  return { sb, inserted };
+}
 
 function fakeSb(matchData: Array<{ id: string }>) {
   const inserted: any[] = [];
@@ -61,5 +82,47 @@ describe("writeUnit", () => {
     expect(r).toBe("reinforced");
     expect(inserted.length).toBe(0);
     expect(updated[0].id).toBe("existing");
+  });
+
+  it("flags a conflict: holds pending + sets conflicts_with/conflict_reason", async () => {
+    const { sb, inserted } = fakeSbConflict([], [{ id: "std1", question: "Q", answer: "old", similarity: 0.85 }]);
+    (judgeConflict as any).mockResolvedValue({ same_question: true, conflict: true, reason: "different fee" });
+    const r = await writeUnit(sb as any, {
+      orgId: "o", unit: unit(0.95), source: "s", sourceId: "id", conflictOpts: { similarity: 0.8 },
+    });
+    expect(r).toBe("created");
+    expect(inserted[0].status).toBe("pending");
+    expect(inserted[0].conflicts_with).toBe("std1");
+    expect(inserted[0].conflict_reason).toBe("different fee");
+  });
+
+  it("no conflict when the judge says answers don't conflict", async () => {
+    const { sb, inserted } = fakeSbConflict([], [{ id: "std1", question: "Q", answer: "old", similarity: 0.85 }]);
+    (judgeConflict as any).mockResolvedValue({ same_question: true, conflict: false, reason: "" });
+    const r = await writeUnit(sb as any, {
+      orgId: "o", unit: unit(0.95), source: "s", sourceId: "id", conflictOpts: { similarity: 0.8 },
+    });
+    expect(r).toBe("created");
+    expect(inserted[0].status).toBe("published");
+    expect(inserted[0].conflicts_with ?? null).toBeNull();
+  });
+
+  it("skips the judge when no published candidate in band", async () => {
+    const { sb, inserted } = fakeSbConflict([], []);
+    (judgeConflict as any).mockClear();
+    const r = await writeUnit(sb as any, {
+      orgId: "o", unit: unit(0.95), source: "s", sourceId: "id", conflictOpts: { similarity: 0.8 },
+    });
+    expect(r).toBe("created");
+    expect(judgeConflict).not.toHaveBeenCalled();
+    expect(inserted[0].status).toBe("published");
+  });
+
+  it("skips conflict detection entirely when conflictOpts is omitted", async () => {
+    const { sb, inserted } = fakeSbConflict([], [{ id: "std1", question: "Q", answer: "old", similarity: 0.85 }]);
+    (judgeConflict as any).mockClear();
+    await writeUnit(sb as any, { orgId: "o", unit: unit(0.95), source: "s", sourceId: "id" });
+    expect(judgeConflict).not.toHaveBeenCalled();
+    expect(inserted[0].status).toBe("published");
   });
 });

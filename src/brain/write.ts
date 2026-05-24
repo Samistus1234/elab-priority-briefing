@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import { embed } from "./embed.js";
 import { scrubPii } from "./pii.js";
 import { statusForConfidence } from "./gating.js";
+import { judgeConflict } from "./conflict.js";
 import type { KnowledgeUnit } from "./types.js";
 import { logger } from "../logger.js";
 
@@ -17,7 +18,7 @@ export type WriteResult = "created" | "reinforced" | "discarded";
  */
 export async function writeUnit(
   sb: SupabaseClient,
-  opts: { orgId: string; unit: KnowledgeUnit; source: string; sourceId: string; forcePending?: boolean },
+  opts: { orgId: string; unit: KnowledgeUnit; source: string; sourceId: string; forcePending?: boolean; conflictOpts?: { similarity: number } },
 ): Promise<WriteResult> {
   const { orgId, unit, source, sourceId, forcePending } = opts;
   const gated = statusForConfidence(unit.confidence); // "published" | "pending" | "discard"
@@ -44,9 +45,33 @@ export async function writeUnit(
     return "reinforced";
   }
 
+  // No dedup match → genuinely new answer. If enabled, check it against the published
+  // standard before writing; a conflict is held pending (never auto-published) + flagged.
+  let conflictsWith: string | null = null;
+  let conflictReason: string | null = null;
+  if (opts.conflictOpts) {
+    const { data: pub } = await sb.rpc("match_brain_entries", {
+      p_org_id: orgId, query_embedding: embedding, match_count: 1,
+      min_similarity: opts.conflictOpts.similarity, p_include_pending: false,
+    });
+    const cand = pub?.[0];
+    if (cand && cand.similarity < DEDUP_THRESHOLD) {
+      const verdict = await judgeConflict(
+        { question, answer },
+        { question: cand.question, answer: cand.answer },
+      );
+      if (verdict.same_question && verdict.conflict) {
+        conflictsWith = cand.id;
+        conflictReason = verdict.reason;
+      }
+    }
+  }
+  const finalStatus = conflictsWith ? "pending" : status;
+
   const { error: insErr } = await sb.from("brain_entries").insert({
     org_id: orgId, topic, question, answer, tags: unit.tags,
-    source_refs: [{ source, id: sourceId }], confidence: unit.confidence, status, embedding,
+    source_refs: [{ source, id: sourceId }], confidence: unit.confidence, status: finalStatus,
+    embedding, conflicts_with: conflictsWith, conflict_reason: conflictReason,
   });
   if (insErr) throw new Error(`brain_entries insert failed: ${insErr.message}`);
   return "created";

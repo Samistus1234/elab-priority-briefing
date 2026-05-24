@@ -5,6 +5,7 @@ import { parseWhatsappExport } from "./whatsapp-parse.js";
 import { chunkIntoTranscripts } from "./import-chunk.js";
 import { extractFromTranscript } from "./extract.js";
 import { writeUnit } from "./write.js";
+import { setConflictBudget } from "./conflict.js";
 
 function errMsg(e: unknown): string {
   return e instanceof Error ? e.message : String(e);
@@ -12,6 +13,8 @@ function errMsg(e: unknown): string {
 
 export async function runImportIngestion(): Promise<{ processed: number; created: number; reinforced: number; failed: number }> {
   const cfg = loadConfig();
+  setConflictBudget(cfg.brain.conflictDetection ? cfg.brain.maxConflictChecksPerRun : 0);
+  const conflictOpts = cfg.brain.conflictDetection ? { similarity: cfg.brain.conflictSimilarity } : undefined;
   const sb = getSupabase();
   const orgId = cfg.supabase.orgId;
   const bucket = cfg.brain.importBucket;
@@ -58,7 +61,7 @@ export async function runImportIngestion(): Promise<{ processed: number; created
         try {
           const units = await extractFromTranscript(chunks[i].transcript);
           for (const u of units) {
-            const r = await writeUnit(sb, { orgId, unit: u, source: "whatsapp_import", sourceId: imp.id, forcePending: true });
+            const r = await writeUnit(sb, { orgId, unit: u, source: "whatsapp_import", sourceId: imp.id, forcePending: true, conflictOpts });
             if (r === "created") cCreated++;
             else if (r === "reinforced") cReinforced++;
           }

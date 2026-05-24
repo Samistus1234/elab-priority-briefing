@@ -4,6 +4,7 @@ import { getSupabase } from "../supabase.js";
 import { fetchWhatsappGroups, fetchCaseGroups, fetchTicketGroups, type Group } from "./sources.js";
 import { extractFromTranscript } from "./extract.js";
 import { writeUnit } from "./write.js";
+import { setConflictBudget } from "./conflict.js";
 
 type Reader = (windowStart: string, cursor: string, limit: number) => Promise<Group[]>;
 const SOURCES: { source: string; read: Reader }[] = [
@@ -14,6 +15,8 @@ const SOURCES: { source: string; read: Reader }[] = [
 
 export async function runBrainSynthesis(): Promise<{ created: number; reinforced: number; discarded: number; processedGroups: number }> {
   const cfg = loadConfig();
+  setConflictBudget(cfg.brain.conflictDetection ? cfg.brain.maxConflictChecksPerRun : 0);
+  const conflictOpts = cfg.brain.conflictDetection ? { similarity: cfg.brain.conflictSimilarity } : undefined;
   const sb = getSupabase();
   const orgId = cfg.supabase.orgId;
   const windowStart = new Date(Date.now() - cfg.brain.windowDays * 86400000).toISOString();
@@ -41,7 +44,7 @@ export async function runBrainSynthesis(): Promise<{ created: number; reinforced
         if (!g.transcript || g.transcript.trim().length < 30) { maxCursor = maxTs(maxCursor, g.cursorTs); continue; }
         const units = await extractFromTranscript(g.transcript);
         for (const u of units) {
-          const result = await writeUnit(sb, { orgId, unit: u, source, sourceId: g.groupId });
+          const result = await writeUnit(sb, { orgId, unit: u, source, sourceId: g.groupId, conflictOpts });
           if (result === "created") created++;
           else if (result === "reinforced") reinforced++;
           else discarded++;

@@ -31,6 +31,9 @@ const ConfigSchema = z.object({
   BRAIN_SYNTH_CRON: z.string().default("0 */2 * * *"),
   BRAIN_MAX_GROUPS_PER_RUN: z.coerce.number().int().positive().default(60),
   BRAIN_WINDOW_DAYS: z.coerce.number().int().positive().default(180),
+  BRAIN_IMPORT_BUCKET: z.string().default("brain-imports"),
+  BRAIN_MAX_CHUNKS_PER_IMPORT: z.coerce.number().int().positive().default(40),
+  BRAIN_IMPORT_CHUNK_BUDGET: z.coerce.number().int().positive().default(12000),
 
   COMMAND_CENTRE_URL: z.string().url().default("https://app.elabsolution.org"),
 
@@ -69,7 +72,7 @@ export type AppConfig = {
   };
   commandCentreUrl: string;
   mcp: { digestLookbackHours: number };
-  brain: { synthCron: string; maxGroupsPerRun: number; windowDays: number };
+  brain: { synthCron: string; maxGroupsPerRun: number; windowDays: number; importBucket: string; maxChunksPerImport: number; importChunkBudget: number };
   maxMessagesPerRun: number;
   neglectThresholdHours: number;
   logLevel: "debug" | "info" | "warn" | "error";
@@ -123,6 +126,9 @@ export function loadConfig(): AppConfig {
       synthCron: e.BRAIN_SYNTH_CRON,
       maxGroupsPerRun: e.BRAIN_MAX_GROUPS_PER_RUN,
       windowDays: e.BRAIN_WINDOW_DAYS,
+      importBucket: e.BRAIN_IMPORT_BUCKET,
+      maxChunksPerImport: e.BRAIN_MAX_CHUNKS_PER_IMPORT,
+      importChunkBudget: e.BRAIN_IMPORT_CHUNK_BUDGET,
     },
     maxMessagesPerRun: e.MAX_MESSAGES_PER_RUN,
     neglectThresholdHours: e.NEGLECT_THRESHOLD_HOURS,

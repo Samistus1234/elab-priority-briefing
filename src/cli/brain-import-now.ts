@@ -3,7 +3,7 @@ import { logger } from "../logger.js";
 
 runImportIngestion()
   .then((r) => {
-    logger.info({ ...r, msg: "brain:import:now completed" }, "brain:import:now completed");
+    logger.info(r, "brain:import:now completed");
     process.exit(0);
   })
   .catch((e) => {

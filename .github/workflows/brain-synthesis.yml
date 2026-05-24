@@ -30,7 +30,8 @@ jobs:
 
       - run: npm ci
 
-      - run: npm run build
+      - id: build
+        run: npm run build
 
       - name: Run brain synthesis
         env:
@@ -56,6 +57,7 @@ jobs:
           grep -q '"msg":"brain:synth:now completed"' run.log
 
       - name: Run brain import ingestion
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:
           SUPABASE_URL: https://fwmhfwprvqaovidykaqt.supabase.co
           SUPABASE_ORG_ID: "00000000-0000-0000-0000-000000000001"

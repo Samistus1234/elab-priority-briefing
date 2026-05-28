@@ -64,7 +64,9 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           ANTHROPIC_MODEL: claude-sonnet-4-6
-          BRAIN_MAX_DOCS_PER_RUN: "20"
+          # 20 was too aggressive at observed ~2 min/doc — synth (~7 min) + docs
+          # (20 × 2 min = 40 min) blew past the 40-min job cap. 12 leaves margin.
+          BRAIN_MAX_DOCS_PER_RUN: "12"
           # Inert placeholders — required by config validation, unused by the brain path.
           META_GRAPH_TOKEN: unused_brain_only_0000000000
           META_PHONE_NUMBER_ID: unused

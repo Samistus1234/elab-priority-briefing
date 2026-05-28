@@ -56,6 +56,25 @@ jobs:
           node build/cli/brain-synth-now.js 2>&1 | tee run.log || true
           grep -q '"msg":"brain:synth:now completed"' run.log
 
+      - name: Run brain knowledge-document ingestion
+        if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+        env:
+          SUPABASE_URL: https://fwmhfwprvqaovidykaqt.supabase.co
+          SUPABASE_ORG_ID: "00000000-0000-0000-0000-000000000001"
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ANTHROPIC_MODEL: claude-sonnet-4-6
+          BRAIN_MAX_DOCS_PER_RUN: "20"
+          # Inert placeholders — required by config validation, unused by the brain path.
+          META_GRAPH_TOKEN: unused_brain_only_0000000000
+          META_PHONE_NUMBER_ID: unused
+          TELEGRAM_BOT_TOKEN: unused_brain_only_0000000000
+          TELEGRAM_CEO_CHAT_ID: "0"
+        run: |
+          set -o pipefail
+          node build/cli/brain-ingest-docs-now.js 2>&1 | tee ingest-docs.log || true
+          grep -q '"msg":"brain:ingest-docs:now completed"' ingest-docs.log
+
       - name: Run brain import ingestion
         if: ${{ !cancelled() && steps.build.outcome == 'success' }}
         env:

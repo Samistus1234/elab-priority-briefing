@@ -3,6 +3,7 @@ import { loadConfig } from "./config.js";
 import { logger } from "./logger.js";
 import { runCeoHealthCheck, runEscalationSweep, runMcpHealthDigest, runMorningBrief } from "./jobs.js";
 import { runBrainSynthesis } from "./brain/synthesize.js";
+import { runKnowledgeDocIngest } from "./brain/ingest-docs.js";
 import { getSupabase } from "./supabase.js";
 
 /**
@@ -63,6 +64,16 @@ export function startSchedulers(): void {
     { timezone: cfg.tz },
   );
 
+  cron.schedule(
+    cfg.brain.docIngestCron,
+    () => {
+      runKnowledgeDocIngest(getSupabase()).catch((e) =>
+        logger.error({ err: (e as Error).message }, "brain_doc_ingest crashed"),
+      );
+    },
+    { timezone: cfg.tz },
+  );
+
   logger.info(
     {
       morning: cfg.cron.morningBrief,
@@ -70,6 +81,7 @@ export function startSchedulers(): void {
       health: cfg.cron.ceoHealthCheck,
       mcpHealthDigest: cfg.cron.mcpHealthDigest,
       brainSynth: cfg.brain.synthCron,
+      brainDocIngest: cfg.brain.docIngestCron,
       tz: cfg.tz,
     },
     "Schedulers started",

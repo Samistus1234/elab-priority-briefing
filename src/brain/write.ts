@@ -18,7 +18,7 @@ export type WriteResult = "created" | "reinforced" | "discarded";
  */
 export async function writeUnit(
   sb: SupabaseClient,
-  opts: { orgId: string; unit: KnowledgeUnit; source: string; sourceId: string; forcePending?: boolean; conflictOpts?: { similarity: number } },
+  opts: { orgId: string; unit: KnowledgeUnit; source: string; sourceId: string; forcePending?: boolean; conflictOpts?: { similarity: number }; sourceDocId?: string },
 ): Promise<WriteResult> {
   const { orgId, unit, source, sourceId, forcePending } = opts;
   const gated = statusForConfidence(unit.confidence); // "published" | "pending" | "discard"
@@ -73,6 +73,7 @@ export async function writeUnit(
     org_id: orgId, topic, question, answer, tags: unit.tags,
     source_refs: [{ source, id: sourceId }], confidence: unit.confidence, status: finalStatus,
     embedding, conflicts_with: conflictsWith, conflict_reason: conflictReason,
+    source_doc_id: opts.sourceDocId ?? null,
   });
   if (insErr) throw new Error(`brain_entries insert failed: ${insErr.message}`);
   return "created";

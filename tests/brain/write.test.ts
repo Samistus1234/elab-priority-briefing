@@ -125,4 +125,25 @@ describe("writeUnit", () => {
     expect(judgeConflict).not.toHaveBeenCalled();
     expect(inserted[0].status).toBe("published");
   });
+
+  it("sets source_doc_id on the inserted row when provided", async () => {
+    const { sb, inserted } = fakeSb([]);
+    const r = await writeUnit(sb as any, {
+      orgId: "o", unit: unit(0.9), source: "knowledge_doc", sourceId: "doc-uuid-1",
+      sourceDocId: "doc-uuid-1",
+    });
+    expect(r).toBe("created");
+    expect(inserted.length).toBe(1);
+    expect(inserted[0].source_doc_id).toBe("doc-uuid-1");
+  });
+
+  it("omits source_doc_id when not provided (back-compat for chat sources)", async () => {
+    const { sb, inserted } = fakeSb([]);
+    const r = await writeUnit(sb as any, {
+      orgId: "o", unit: unit(0.9), source: "whatsapp_convo", sourceId: "convo-1",
+    });
+    expect(r).toBe("created");
+    // null is fine; undefined is fine; the key thing is no leakage of a doc id.
+    expect(inserted[0].source_doc_id).toBeFalsy();
+  });
 });

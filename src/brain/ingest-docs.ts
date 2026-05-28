@@ -80,14 +80,10 @@ export async function runKnowledgeDocIngest(sb: SupabaseClient): Promise<IngestS
   }
 
   // 5. New + changed (capped).
-  // Note: cfg.brain.maxDocsPerRun is added in Task 7 (env mapping). Cast here so this
-  // task can land in isolation without the config change; once Task 7 lands the cast
-  // becomes a no-op.
-  const maxDocsPerRun = (cfg.brain as { maxDocsPerRun?: number }).maxDocsPerRun ?? 20;
   const toProcess: Array<{ doc: DocGroup; kind: "new" | "changed" }> = [
     ...newDocs.map((d) => ({ doc: d, kind: "new" as const })),
     ...changedDocs.map((d) => ({ doc: d, kind: "changed" as const })),
-  ].slice(0, maxDocsPerRun);
+  ].slice(0, cfg.brain.maxDocsPerRun);
 
   for (const { doc, kind } of toProcess) {
     try {

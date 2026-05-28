@@ -38,6 +38,8 @@ const ConfigSchema = z.object({
   BRAIN_CONFLICT_DETECTION: z.enum(["true", "false"]).default("true"),
   BRAIN_CONFLICT_SIMILARITY: z.coerce.number().default(0.80),
   BRAIN_MAX_CONFLICT_CHECKS_PER_RUN: z.coerce.number().int().positive().default(50),
+  BRAIN_MAX_DOCS_PER_RUN: z.coerce.number().int().positive().default(20),
+  BRAIN_DOC_INGEST_CRON: z.string().default("30 1 * * *"),
 
   COMMAND_CENTRE_URL: z.string().url().default("https://app.elabsolution.org"),
 
@@ -76,7 +78,7 @@ export type AppConfig = {
   };
   commandCentreUrl: string;
   mcp: { digestLookbackHours: number };
-  brain: { synthCron: string; maxGroupsPerRun: number; windowDays: number; importBucket: string; maxChunksPerImport: number; importChunkBudget: number; maxImportsPerRun: number; conflictDetection: boolean; conflictSimilarity: number; maxConflictChecksPerRun: number };
+  brain: { synthCron: string; maxGroupsPerRun: number; windowDays: number; importBucket: string; maxChunksPerImport: number; importChunkBudget: number; maxImportsPerRun: number; conflictDetection: boolean; conflictSimilarity: number; maxConflictChecksPerRun: number; maxDocsPerRun: number; docIngestCron: string };
   maxMessagesPerRun: number;
   neglectThresholdHours: number;
   logLevel: "debug" | "info" | "warn" | "error";
@@ -137,6 +139,8 @@ export function loadConfig(): AppConfig {
       conflictDetection: e.BRAIN_CONFLICT_DETECTION === "true",
       conflictSimilarity: e.BRAIN_CONFLICT_SIMILARITY,
       maxConflictChecksPerRun: e.BRAIN_MAX_CONFLICT_CHECKS_PER_RUN,
+      maxDocsPerRun: e.BRAIN_MAX_DOCS_PER_RUN,
+      docIngestCron: e.BRAIN_DOC_INGEST_CRON,
     },
     maxMessagesPerRun: e.MAX_MESSAGES_PER_RUN,
     neglectThresholdHours: e.NEGLECT_THRESHOLD_HOURS,

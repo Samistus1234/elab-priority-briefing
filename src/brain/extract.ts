@@ -30,13 +30,18 @@ export async function extractFromCanonicalDoc(transcript: string): Promise<Knowl
   const client = new Anthropic({ apiKey: cfg.llm.apiKey });
   const resp = await client.messages.create({
     model: cfg.llm.model,
-    max_tokens: 3000,
+    // Long SOPs (12-18K input chars) produce many units; 3000 tokens truncated
+    // the JSON for long docs, causing parseUnits to silently return [].
+    max_tokens: 8192,
     messages: [{ role: "user", content: buildCanonicalDocExtractionPrompt(transcript) }],
   });
   const text = resp.content
     .filter((b): b is Anthropic.TextBlock => b.type === "text")
     .map((b) => b.text)
     .join("\n");
-  logger.debug({ units: "extracted-canonical" }, "brain extract canonical");
-  return parseUnits(text);
+  const units = parseUnits(text);
+  // Visibility into per-doc yield: shows up in the GH Actions log so we can
+  // spot under-extraction (e.g., max_tokens still tight or PII filter dropping units).
+  logger.info({ unitsFromLlm: units.length, rawLen: text.length }, "brain extract canonical");
+  return units;
 }

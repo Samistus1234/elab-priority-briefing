@@ -32,7 +32,7 @@ import { writeUnit } from "../../src/brain/write.js";
  *  - brain_doc_ingestions.select → returns `tracked`
  *  - All writes (delete/upsert/etc) recorded into `calls`.
  */
-function fakeSb(docs: any[], tracked: any[]) {
+function fakeSb(docs: any[], tracked: any[], liveEntries: { source_doc_id: string }[] = []) {
   const calls: any[] = [];
   const sb: any = {
     from: vi.fn((table: string) => {
@@ -68,6 +68,8 @@ function fakeSb(docs: any[], tracked: any[]) {
       }
       if (table === "brain_entries") {
         return {
+          // Orphan-detection read: .select("source_doc_id").eq("org_id",…).not("source_doc_id","is",null)
+          select: () => ({ eq: () => ({ not: async () => ({ data: liveEntries, error: null }) }) }),
           delete: () => ({
             eq: vi.fn(async (col: string, val: string) => {
               calls.push({ table: "brain_entries", op: "delete", col, val });
@@ -111,10 +113,10 @@ describe("runKnowledgeDocIngest", () => {
     expect(summary.entriesCreated).toBe(2);
   });
 
-  it("skips docs whose content hash is unchanged", async () => {
+  it("skips docs whose content hash is unchanged AND still have live entries", async () => {
     const docs = [doc("d1", "Body 1")];
     const tracked = [{ doc_id: "d1", content_hash: hashDocContent("Body 1"), org_id: "org-1" }];
-    const { sb, calls } = fakeSb(docs, tracked);
+    const { sb, calls } = fakeSb(docs, tracked, [{ source_doc_id: "d1" }]);
     const summary = await runKnowledgeDocIngest(sb);
     expect(extractFromCanonicalDoc).not.toHaveBeenCalled();
     expect(writeUnit).not.toHaveBeenCalled();
@@ -123,12 +125,36 @@ describe("runKnowledgeDocIngest", () => {
     expect(summary.changedCount).toBe(0);
   });
 
-  it("on hash change: deletes prior brain_entries for that doc, then re-extracts", async () => {
+  it("orphan recovery: re-ingests a tracked, hash-unchanged doc whose entries have vanished", async () => {
+    const docs = [doc("d1", "Body 1")];
+    const tracked = [{ doc_id: "d1", content_hash: hashDocContent("Body 1"), org_id: "org-1" }];
+    // liveEntries is EMPTY → d1 is orphaned even though its hash matches.
+    const { sb, calls } = fakeSb(docs, tracked, []);
+    const summary = await runKnowledgeDocIngest(sb);
+    expect(extractFromCanonicalDoc).toHaveBeenCalledTimes(1);
+    expect(summary.changedCount).toBe(1);
+    expect(calls.some((c) => c.table === "brain_doc_ingestions" && c.op === "upsert")).toBe(true);
+  });
+
+  it("extract-before-delete: extraction failure on a changed doc does NOT delete its entries", async () => {
     const docs = [doc("d1", "NEW body")];
     const tracked = [{ doc_id: "d1", content_hash: hashDocContent("OLD body"), org_id: "org-1" }];
-    const { sb, calls } = fakeSb(docs, tracked);
+    vi.mocked(extractFromCanonicalDoc).mockRejectedValueOnce(new Error("LLM timeout"));
+    const { sb, calls } = fakeSb(docs, tracked, [{ source_doc_id: "d1" }]);
     const summary = await runKnowledgeDocIngest(sb);
-    // The delete-by-source_doc_id happened FIRST.
+    expect(summary.errors).toBe(1);
+    // The existing entries must be preserved — no delete-by-source_doc_id fired.
+    expect(calls.some((c) => c.table === "brain_entries" && c.op === "delete" && c.val === "d1")).toBe(false);
+    // And tracking is left stale (no upsert) so a later run retries.
+    expect(calls.some((c) => c.table === "brain_doc_ingestions" && c.op === "upsert")).toBe(false);
+  });
+
+  it("on hash change: re-extracts then replaces prior brain_entries for that doc", async () => {
+    const docs = [doc("d1", "NEW body")];
+    const tracked = [{ doc_id: "d1", content_hash: hashDocContent("OLD body"), org_id: "org-1" }];
+    const { sb, calls } = fakeSb(docs, tracked, [{ source_doc_id: "d1" }]);
+    const summary = await runKnowledgeDocIngest(sb);
+    // The delete-by-source_doc_id happened (after a successful extract).
     const delIdx = calls.findIndex((c) => c.table === "brain_entries" && c.op === "delete" && c.val === "d1");
     expect(delIdx).toBeGreaterThanOrEqual(0);
     expect(extractFromCanonicalDoc).toHaveBeenCalledTimes(1);

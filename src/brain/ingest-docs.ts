@@ -44,6 +44,20 @@ export async function runKnowledgeDocIngest(sb: SupabaseClient): Promise<IngestS
   const trackedById = new Map(tracked.map((t) => [t.doc_id, t]));
   const activeById = new Map(active.map((a) => [a.sourceId, a]));
 
+  // Live entry counts per source doc. Lets us detect ORPHANED trackings — a doc
+  // whose hash is unchanged (so the hash diff would skip it) but whose derived
+  // entries have vanished (e.g. a prior delete-then-failed-extract, or an admin
+  // wipe). Without this, such a doc stays invisible to the Brain forever.
+  const { data: liveRows } = await sb
+    .from("brain_entries")
+    .select("source_doc_id")
+    .eq("org_id", orgId)
+    .not("source_doc_id", "is", null);
+  const liveCount = new Map<string, number>();
+  for (const r of (liveRows ?? []) as { source_doc_id: string }[]) {
+    liveCount.set(r.source_doc_id, (liveCount.get(r.source_doc_id) ?? 0) + 1);
+  }
+
   // 3. Diff.
   const newDocs: DocGroup[] = [];
   const changedDocs: DocGroup[] = [];
@@ -51,6 +65,8 @@ export async function runKnowledgeDocIngest(sb: SupabaseClient): Promise<IngestS
     const t = trackedById.get(d.sourceId);
     if (!t) newDocs.push(d);
     else if (t.content_hash !== d.contentHash) changedDocs.push(d);
+    // Orphan recovery: tracked + hash-unchanged, but its entries are gone.
+    else if ((liveCount.get(d.sourceId) ?? 0) === 0) changedDocs.push(d);
   }
   const staleIds: string[] = [];
   for (const t of tracked) {
@@ -87,10 +103,14 @@ export async function runKnowledgeDocIngest(sb: SupabaseClient): Promise<IngestS
 
   for (const { doc, kind } of toProcess) {
     try {
+      // Extract FIRST, then replace. If extraction throws, we must not have
+      // deleted anything yet — otherwise a transient LLM failure permanently
+      // destroys the doc's entries, and (when the hash is unchanged) it would
+      // never be retried. Delete-then-insert only happens on a successful parse.
+      const units = await extractFromCanonicalDoc(doc.transcript);
       if (kind === "changed") {
         await sb.from("brain_entries").delete().eq("source_doc_id", doc.sourceId);
       }
-      const units = await extractFromCanonicalDoc(doc.transcript);
       let createdHere = 0, reinforcedHere = 0;
       for (const u of units) {
         const r = await writeUnit(sb, {

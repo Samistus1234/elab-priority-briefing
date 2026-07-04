@@ -56,4 +56,12 @@ describe("postChannelMessage", () => {
     await expect(postChannelMessage({ channelName: "daily-briefs", body: "x", agent: "Herald" }))
       .resolves.toBe(false);
   });
+
+  it("returns false when the channel is missing", async () => {
+    fromMock
+      .mockReturnValueOnce(chain({ data: { id: "svc-1" }, error: null }))
+      .mockReturnValueOnce(chain({ data: null, error: null }));
+    await expect(postChannelMessage({ channelName: "daily-briefs", body: "x", agent: "Herald" }))
+      .resolves.toBe(false);
+  });
 });

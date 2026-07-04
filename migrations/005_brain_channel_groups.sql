@@ -14,7 +14,6 @@ as $$
   with msgs as (
     select
       m.channel_id,
-      c.name as channel_name,
       date_trunc('day', m.created_at) as day,
       m.created_at,
       coalesce(u.full_name, 'Staff') as speaker,
@@ -32,12 +31,11 @@ as $$
   grouped as (
     select
       channel_id,
-      channel_name,
       day,
       max(created_at) as cursor_ts,
       jsonb_agg(jsonb_build_object('who', speaker, 'text', body, 'at', created_at) order by created_at) as lines
     from msgs
-    group by channel_id, channel_name, day
+    group by channel_id, day
   )
   select
     channel_id::text || ':' || to_char(day, 'YYYY-MM-DD') as group_key,
@@ -47,5 +45,8 @@ as $$
   order by cursor_ts asc
   limit p_limit
 $$;
+
+create index if not exists idx_channel_messages_channel_created
+  on channel_messages (channel_id, created_at);
 
 commit;

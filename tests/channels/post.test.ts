@@ -26,10 +26,12 @@ describe("postChannelMessage", () => {
     const userChain = chain({ data: { id: "svc-1" }, error: null });
     const channelChain = chain({ data: { id: "chan-1" }, error: null });
     const insertChain = { insert: vi.fn().mockResolvedValue({ error: null }) };
+    const updateChain = { update: vi.fn().mockReturnValue({ eq: vi.fn().mockResolvedValue({}) }) };
     fromMock
       .mockReturnValueOnce(userChain)
       .mockReturnValueOnce(channelChain)
-      .mockReturnValueOnce(insertChain);
+      .mockReturnValueOnce(insertChain)
+      .mockReturnValueOnce(updateChain);
 
     const ok = await postChannelMessage({ channelName: "daily-briefs", body: "Morning brief", agent: "Herald" });
 

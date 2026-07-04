@@ -44,6 +44,8 @@ export async function postChannelMessage(params: {
       logger.warn({ err: error.message }, "channel post failed");
       return false;
     }
+    // Best-effort: bump channel recency so sidebar order reflects the new post.
+    await sb.from("channels").update({ updated_at: new Date().toISOString() }).eq("id", channel.id);
     return true;
   } catch (e) {
     logger.warn({ err: (e as Error).message }, "channel post crashed");

@@ -1,5 +1,6 @@
 -- Groups org-channel messages by channel+day for Brain synthesis.
--- Excludes: DM channels, deleted messages, agent/bot messages (service user or metadata.agent).
+-- Includes: public channels only (private and case channels excluded).
+-- Excludes: deleted messages, agent/bot messages (service user or metadata.agent).
 begin;
 
 create or replace function public.brain_channel_groups(
@@ -23,7 +24,7 @@ as $$
     left join users u on u.id = m.user_id
     where m.created_at > greatest(p_window_start, p_cursor)
       and coalesce(m.is_deleted, false) = false
-      and c.channel_type <> 'dm'
+      and c.channel_type = 'public'
       and coalesce(m.metadata->>'agent', '') = ''
       and coalesce(u.email, '') <> 'agents@elabsolution.org'
       and coalesce(m.body, '') <> ''

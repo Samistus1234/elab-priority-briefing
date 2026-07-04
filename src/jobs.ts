@@ -99,7 +99,11 @@ export async function runMorningBrief(): Promise<void> {
     status: cfg.dryRun ? "dry_run" : rollupResult.ok ? "sent" : "failed",
     error: rollupResult.error,
   });
-  await postChannelMessage({ channelName: "daily-briefs", body: rollup.text, agent: "Herald" });
+  if (cfg.dryRun) {
+    logger.info({ channel: "daily-briefs", agent: "Herald" }, "[DRY] channel post skipped");
+  } else {
+    await postChannelMessage({ channelName: "daily-briefs", body: rollup.text, agent: "Herald" });
+  }
 
   if (!rollupResult.ok && !cfg.dryRun) {
     await writeFallbackRollup(rollup.text).catch((e) =>

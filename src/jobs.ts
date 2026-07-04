@@ -16,6 +16,7 @@ import {
 } from "./priority-engine.js";
 import { Dispatcher } from "./dispatcher.js";
 import { buildMcpDigest, diagnoseFailures, gatherMcpStats, pruneOldMcpCalls } from "./mcp-health.js";
+import { postChannelMessage } from "./channels/post.js";
 import type { CaseLite, StaffUser, SendStatus } from "./types.js";
 
 /**
@@ -98,6 +99,7 @@ export async function runMorningBrief(): Promise<void> {
     status: cfg.dryRun ? "dry_run" : rollupResult.ok ? "sent" : "failed",
     error: rollupResult.error,
   });
+  await postChannelMessage({ channelName: "daily-briefs", body: rollup.text, agent: "Herald" });
 
   if (!rollupResult.ok && !cfg.dryRun) {
     await writeFallbackRollup(rollup.text).catch((e) =>

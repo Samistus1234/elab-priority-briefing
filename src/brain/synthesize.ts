@@ -1,7 +1,7 @@
 import { loadConfig } from "../config.js";
 import { logger } from "../logger.js";
 import { getSupabase } from "../supabase.js";
-import { fetchWhatsappGroups, fetchCaseGroups, fetchTicketGroups, type Group } from "./sources.js";
+import { fetchWhatsappGroups, fetchCaseGroups, fetchTicketGroups, fetchChannelGroups, type Group } from "./sources.js";
 import { extractFromTranscript } from "./extract.js";
 import { writeUnit } from "./write.js";
 import { setConflictBudget } from "./conflict.js";
@@ -11,6 +11,7 @@ const SOURCES: { source: string; read: Reader }[] = [
   { source: "whatsapp_convo", read: fetchWhatsappGroups },
   { source: "case", read: fetchCaseGroups },
   { source: "ticket", read: fetchTicketGroups },
+  { source: "channel", read: fetchChannelGroups },
 ];
 
 export async function runBrainSynthesis(): Promise<{ created: number; reinforced: number; discarded: number; processedGroups: number }> {

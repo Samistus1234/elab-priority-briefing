@@ -47,6 +47,37 @@ export async function fetchCaseGroups(windowStart: string, cursor: string, limit
   return out;
 }
 
+export async function fetchChannelGroups(windowStart: string, cursor: string, limit: number): Promise<Group[]> {
+  const sb = getSupabase();
+  const { data, error } = await sb.rpc("brain_channel_groups", {
+    p_window_start: windowStart,
+    p_cursor: cursor,
+    p_limit: limit,
+  });
+  if (error || !data) {
+    console.error("brain_channel_groups failed:", (error as any)?.message ?? "no data");
+    return [];
+  }
+
+  return (data as { group_key: string; cursor_ts: string; lines: { who: string; text: string }[] }[])
+    .map(row => {
+      const lines = row.lines.map(l => `${l.who}: ${l.text}`);
+      let transcript = "";
+      for (const line of lines) {
+        const next = transcript ? `${transcript}\n${line}` : line;
+        if (next.length > 12000) break;
+        transcript = next;
+      }
+      return {
+        source: "channel",
+        groupId: row.group_key,
+        cursorTs: row.cursor_ts,
+        transcript,
+      };
+    })
+    .filter(g => g.transcript.length > 0);
+}
+
 export async function fetchTicketGroups(windowStart: string, cursor: string, limit: number): Promise<Group[]> {
   const sb = getSupabase();
   const { data: tickets, error } = await sb.from("helpdesk_tickets")
